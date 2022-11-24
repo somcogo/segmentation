@@ -1,46 +1,21 @@
-from torchvision import datasets
 from torchvision.transforms import ToTensor, Normalize, Compose
 from torch.utils.data import DataLoader, Dataset
+import torch
 
-from collections import namedtuple
+import copy
 import glob
-import csv
 import os
-import json
 import nibabel as nib
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy import ndimage
+import functools
 
 def getIdList():
     raw_path_list = glob.glob('./data/altesCT/raw/*')
     id_list = [os.path.split(path)[-1][:-7] for path in raw_path_list]
     return id_list
 
-def getCenterList():
-    raw_path_list = glob.glob('./data/verse19/dataset-verse19test/rawdata/*/*')
-    raw_path_list.sort()
-    raw_path_list = raw_path_list[:10]
-
-    derivatives_path_list = glob.glob('./data/verse19/dataset-verse19test/derivatives/*')
-    derivatives_path_list.sort()
-    derivatives_path_list = derivatives_path_list[:10]
-
-    id_list = [os.path.split(path)[-1][:-10] for path in raw_path_list]
-    id_list.sort()
-    id_list = id_list[:10]
-
-    center_list = {}
-    for id in id_list:
-        with open('./data/verse19/dataset-verse19test/derivatives/{}/{}_seg-vb_ctd.json'.format(id, id)) as f:
-            data = json.load(f)
-            for x in data[1:]:
-                if x['label'] == 20:
-                    center_list[id] = [x['X'], x['Y'], x['Z']]
-    
-    return id_list, center_list
-
-def getSegmentBoundary(img):
+def getCenterCoords(img):
 
     x_sum = np.sum(img, axis=(1, 2))
     x_indices = np.where(x_sum != 0)
@@ -57,7 +32,37 @@ def getSegmentBoundary(img):
     z_min = z_indices[0][0]
     z_max = z_indices[0][-1]
 
-    return x_min, x_max, y_min, y_max, z_min, z_max
+    x = int(( x_max + x_min) / 2)
+    y = int(( y_max + y_min) / 2)
+    z = int(( z_max + z_min) / 2)
+
+    return x, y, z
+
+# @functools.lru_cache
+def getImages(id):
+    data = nib.load('./data/altesCT/raw/{}.nii.gz'.format(id))
+    data_mask = nib.load('./data/altesCT/mask/{}-labels.nii'.format(id))
+    img = data.get_fdata()
+    mask = data_mask.get_fdata()
+
+    zooms = data.header.get_zooms()
+    center_coord = getCenterCoords(mask)
+    lengths = ( np.asarray(50) / np.asarray(zooms) ).astype(int)
+    img = img[
+        center_coord[0] - lengths[0]: center_coord[0] + lengths[0],
+        center_coord[1] - lengths[1]: center_coord[1] + lengths[1],
+        center_coord[2] - lengths[2]: center_coord[2] + lengths[2]
+    ]
+    mask = mask[
+        center_coord[0] - lengths[0]: center_coord[0] + lengths[0],
+        center_coord[1] - lengths[1]: center_coord[1] + lengths[1],
+        center_coord[2] - lengths[2]: center_coord[2] + lengths[2]
+    ]
+
+    interpolation_zoom = 64 / np.asarray(img.shape)
+    img = ndimage.zoom(img, interpolation_zoom, order=1)
+    mask = ndimage.zoom(mask, interpolation_zoom, order=1)
+    return img, mask
 
 def cropImage(img, boundary_coord):
     x1, x2, y1, y2, z1, z2 = boundary_coord
@@ -75,7 +80,6 @@ def cropImage(img, boundary_coord):
         y_min: y_min + side_length,
         z_min: z_min + side_length
         ]
-    print(img.shape)
     return img
 
 def getRatio(list):
@@ -100,33 +104,33 @@ id_list = getIdList()
 for id in id_list:
     data = nib.load('./data/altesCT/raw/{}.nii.gz'.format(id))
     data_mask = nib.load('./data/altesCT/mask/{}-labels.nii'.format(id))
+    print('loaded images')
     img = data.get_fdata()
     mask = data_mask.get_fdata()
-    # mask = mask == 20
-    boundary_coord = getSegmentBoundary(mask)
+    print('got image data')
+    img, mask = getImages(id)
+    print(mask.shape, img.shape)
+    # nifti_img = nib.Nifti1Image(img, np.eye(4))
+    # nifti_mask = nib.Nifti1Image(mask, np.eye(4))
+    # nib.save(nifti_img, os.path.join('/home/somahansel/work/segmentation_test/data/altesCT/test/{}.nii.gz'.format(id)))
+    # nib.save(nifti_mask, os.path.join('/home/somahansel/work/segmentation_test/data/altesCT/test/{}-labels.nii.gz'.format(id)))
 
-    img = interpolateImage(img, data.header.get_zooms())
-    mask = interpolateImage(mask, data_mask.header.get_zooms())
-
-    print(mask.shape)
-    img = cropImage(img, boundary_coord)
-    mask = cropImage(mask, boundary_coord)
-    mask = mask.astype(float)
-
-    print(mask.shape)
-    # file = nib.Nifti1Image(img, np.eye(4))
-    # file_mask = nib.Nifti1Image(mask, np.eye(4))
-    # nib.save(file, os.path.join('./data/test', 'test.nii.gz'))
-    # nib.save(file_mask, os.path.join('./data/test', 'test_mask.nii.gz'))
-    # break
-
-class SampleDataset(Dataset):
-    def __init__(self, datalist):
-        super().__init__()
-        self.datalist = datalist
+class SegmentationDataset(Dataset):
+    def __init__(self):
+        self.id_list = copy.copy(getIdList())
     
     def __len__(self):
-        return len(self.datalist)
+        return 1000
 
     def __getitem__(self, index):
-        return self.datalist[index]
+        id = self.id_list[index % 2]
+        img, mask = getImages(id)
+        img = torch.tensor(img)
+        img = (img - torch.mean(img)) / torch.std(img)
+        mask = torch.tensor(mask)
+        mask = (mask - torch.mean(mask)) / torch.std(mask)
+        return img, mask
+
+def getDataLoader(batch_size):
+    train_ds = SegmentationDataset()
+    return DataLoader(train_ds, batch_size=batch_size, drop_last=True)
