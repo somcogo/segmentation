@@ -12,6 +12,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import ndimage
 
+def getIdList():
+    raw_path_list = glob.glob('./data/altesCT/raw/*')
+    id_list = [os.path.split(path)[-1][:-7] for path in raw_path_list]
+    return id_list
 
 def getCenterList():
     raw_path_list = glob.glob('./data/verse19/dataset-verse19test/rawdata/*/*')
@@ -92,14 +96,13 @@ def interpolateImage(img, zooms):
 
     return out
 
-id_list, center_list = getCenterList()
-id_list = id_list[4:5]
+id_list = getIdList()
 for id in id_list:
-    data = nib.load('./data/verse19/dataset-verse19test/rawdata/{}/{}_ct.nii.gz'.format(id, id))
-    data_mask = nib.load('./data/verse19/dataset-verse19test/derivatives/{}/{}_seg-vert_msk.nii.gz'.format(id, id))
+    data = nib.load('./data/altesCT/raw/{}.nii.gz'.format(id))
+    data_mask = nib.load('./data/altesCT/mask/{}-labels.nii'.format(id))
     img = data.get_fdata()
     mask = data_mask.get_fdata()
-    mask = mask == 20
+    # mask = mask == 20
     boundary_coord = getSegmentBoundary(mask)
 
     img = interpolateImage(img, data.header.get_zooms())
