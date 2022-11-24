@@ -1,4 +1,3 @@
-from torchvision.transforms import ToTensor, Normalize, Compose
 from torch.utils.data import DataLoader, Dataset
 import torch
 
@@ -38,7 +37,7 @@ def getCenterCoords(img):
 
     return x, y, z
 
-# @functools.lru_cache
+@functools.lru_cache
 def getImages(id):
     data = nib.load('./data/altesCT/raw/{}.nii.gz'.format(id))
     data_mask = nib.load('./data/altesCT/mask/{}-labels.nii'.format(id))
@@ -63,57 +62,6 @@ def getImages(id):
     img = ndimage.zoom(img, interpolation_zoom, order=1)
     mask = ndimage.zoom(mask, interpolation_zoom, order=1)
     return img, mask
-
-def cropImage(img, boundary_coord):
-    x1, x2, y1, y2, z1, z2 = boundary_coord
-    x = int( (x2 + x1) / 2)
-    y = int( (y2 + y1) / 2)
-    z = int( (z2 + z1) / 2)
-    max_size = max(x2 - x1, y2 - y1, z2 - z1)
-    side_length = min(min(img.shape), max_size * 4)
-    x_min = max( int(x - (side_length / 2)), 0)
-    x_min = min( x_min, img.shape[0] - side_length)
-    y_min = max( int(y - (side_length / 2)), 0)
-    z_min = max( int(z - (side_length / 2)), 0)
-    img = img[
-        x_min: x_min + side_length,
-        y_min: y_min + side_length,
-        z_min: z_min + side_length
-        ]
-    return img
-
-def getRatio(list):
-    min = np.min(list)
-    out = [l / min for l in list]
-    return out
-
-def interpolateImage(img, zooms):
-    out = ndimage.zoom(img, zooms, order=1)
-    # fig = plt.figure()
-    # ax1 = fig.add_subplot(121)
-    # ax2 = fig.add_subplot(122)
-    # middle1 = int(img.shape[0] / 2)
-    # middle2 = int(out.shape[0] / 2)
-    # ax1.imshow(img[middle1,:,:])
-    # ax2.imshow(out[middle2,:,:])
-    # plt.show()
-
-    return out
-
-id_list = getIdList()
-for id in id_list:
-    data = nib.load('./data/altesCT/raw/{}.nii.gz'.format(id))
-    data_mask = nib.load('./data/altesCT/mask/{}-labels.nii'.format(id))
-    print('loaded images')
-    img = data.get_fdata()
-    mask = data_mask.get_fdata()
-    print('got image data')
-    img, mask = getImages(id)
-    print(mask.shape, img.shape)
-    # nifti_img = nib.Nifti1Image(img, np.eye(4))
-    # nifti_mask = nib.Nifti1Image(mask, np.eye(4))
-    # nib.save(nifti_img, os.path.join('/home/somahansel/work/segmentation_test/data/altesCT/test/{}.nii.gz'.format(id)))
-    # nib.save(nifti_mask, os.path.join('/home/somahansel/work/segmentation_test/data/altesCT/test/{}-labels.nii.gz'.format(id)))
 
 class SegmentationDataset(Dataset):
     def __init__(self):
