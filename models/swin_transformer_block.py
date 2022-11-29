@@ -38,25 +38,29 @@ def window_partition(x, window_size):
         H // window_size,
         window_size,
         W // window_size,
-        window_size, C
+        window_size,
+        D // window_size,
+        window_size,
+        C
     )
-    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
+    windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, window_size, window_size, window_size, C)
     return windows
 
 
-def window_reverse(windows, window_size, H, W):
+def window_reverse(windows, window_size, H, W, D):
     """
     Args:
         windows: (num_windows*B, window_size, window_size, C)
         window_size (int): Window size
         H (int): Height of image
         W (int): Width of image
+        D (int): Depth of image
     Returns:
-        x: (B, H, W, C)
+        x: (B, H, W, D, C)
     """
-    B = int(windows.shape[0] / (H * W / window_size / window_size))
-    x = windows.view(B, H // window_size, W // window_size, window_size, window_size, -1)
-    x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
+    B = int(windows.shape[0] / (H * W * D/ window_size / window_size / window_size))
+    x = windows.view(B, H // window_size, W // window_size, D // window_size, window_size, window_size, window_size, -1)
+    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, H, W, D, -1)
     return x
 
 
@@ -77,34 +81,34 @@ class WindowAttention(nn.Module):
 
         super().__init__()
         self.dim = dim
-        self.window_size = window_size  # Wh, Ww
+        self.window_size = window_size  # Wh, Ww, Wd
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
 
         # define a parameter table of relative position bias
-        self.relative_position_bias_table = nn.Parameter(
-            torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
+        # self.relative_position_bias_table = nn.Parameter(
+        #     torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
 
         # get pair-wise relative position index for each token inside the window
-        coords_h = torch.arange(self.window_size[0])
-        coords_w = torch.arange(self.window_size[1])
-        coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
-        coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
-        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
-        relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
-        relative_coords[:, :, 0] += self.window_size[0] - 1  # shift to start from 0
-        relative_coords[:, :, 1] += self.window_size[1] - 1
-        relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
-        relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
-        self.register_buffer("relative_position_index", relative_position_index)
+        # coords_h = torch.arange(self.window_size[0])
+        # coords_w = torch.arange(self.window_size[1])
+        # coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
+        # coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
+        # relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
+        # relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
+        # relative_coords[:, :, 0] += self.window_size[0] - 1  # shift to start from 0
+        # relative_coords[:, :, 1] += self.window_size[1] - 1
+        # relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
+        # relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
+        # self.register_buffer("relative_position_index", relative_position_index)
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-        trunc_normal_(self.relative_position_bias_table, std=.02)
+        # trunc_normal_(self.relative_position_bias_table, std=.02)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, mask=None):
@@ -120,10 +124,10 @@ class WindowAttention(nn.Module):
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))
 
-        relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
-            self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
-        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
-        attn = attn + relative_position_bias.unsqueeze(0)
+        # relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
+        #     self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
+        # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        # attn = attn + relative_position_bias.unsqueeze(0)
 
         if mask is not None:
             nW = mask.shape[0]
@@ -143,18 +147,18 @@ class WindowAttention(nn.Module):
     def extra_repr(self) -> str:
         return f'dim={self.dim}, window_size={self.window_size}, num_heads={self.num_heads}'
 
-    def flops(self, N):
-        # calculate flops for 1 window with token length of N
-        flops = 0
-        # qkv = self.qkv(x)
-        flops += N * self.dim * 3 * self.dim
-        # attn = (q @ k.transpose(-2, -1))
-        flops += self.num_heads * N * (self.dim // self.num_heads) * N
-        #  x = (attn @ v)
-        flops += self.num_heads * N * N * (self.dim // self.num_heads)
-        # x = self.proj(x)
-        flops += N * self.dim * self.dim
-        return flops
+    # def flops(self, N):
+    #     # calculate flops for 1 window with token length of N
+    #     flops = 0
+    #     # qkv = self.qkv(x)
+    #     flops += N * self.dim * 3 * self.dim
+    #     # attn = (q @ k.transpose(-2, -1))
+    #     flops += self.num_heads * N * (self.dim // self.num_heads) * N
+    #     #  x = (attn @ v)
+    #     flops += self.num_heads * N * N * (self.dim // self.num_heads)
+    #     # x = self.proj(x)
+    #     flops += N * self.dim * self.dim
+    #     return flops
 
 
 class SwinTransformerBlock(nn.Module):
