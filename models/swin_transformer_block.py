@@ -209,71 +209,69 @@ class SwinTransformerBlock(nn.Module):
 
         if self.shift_size > 0:
             # calculate attention mask for SW-MSA
-            H, W = self.input_resolution
-            img_mask = torch.zeros((1, H, W, 1))  # 1 H W 1
+            H, W, D = self.input_resolution
+            img_mask = torch.zeros((1, H, W, D, 1))  # 1 H W D 1
             h_slices = (slice(0, -self.window_size),
                         slice(-self.window_size, -self.shift_size),
                         slice(-self.shift_size, None))
             w_slices = (slice(0, -self.window_size),
                         slice(-self.window_size, -self.shift_size),
                         slice(-self.shift_size, None))
+            d_slices = (slice(0, -self.window_size),
+                        slice(-self.window_size, -self.shift_size),
+                        slice(-self.shift_size, None))
             cnt = 0
             for h in h_slices:
                 for w in w_slices:
-                    img_mask[:, h, w, :] = cnt
-                    cnt += 1
+                    for d in d_slices:
+                        img_mask[:, h, w, d, :] = cnt
+                        cnt += 1
 
-            mask_windows = window_partition(img_mask, self.window_size)  # nW, window_size, window_size, 1
-            mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
+            mask_windows = window_partition(img_mask, self.window_size)  # nW, window_size, window_size, window_size, 1
+            mask_windows = mask_windows.view(-1, self.window_size * self.window_size * self.window_size)
             attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
             attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
         else:
             attn_mask = None
 
         self.register_buffer("attn_mask", attn_mask)
-        self.fused_window_process = fused_window_process
+        # self.fused_window_process = fused_window_process
 
     def forward(self, x):
-        H, W = self.input_resolution
+        H, W, D = self.input_resolution
         B, L, C = x.shape
-        assert L == H * W, "input feature has wrong size"
+        assert L == H * W * D, "input feature has wrong size"
 
         shortcut = x
         x = self.norm1(x)
-        x = x.view(B, H, W, C)
+        x = x.view(B, H, W, D, C)
 
         # cyclic shift
         if self.shift_size > 0:
-            if not self.fused_window_process:
-                shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
-                # partition windows
-                x_windows = window_partition(shifted_x, self.window_size)  # nW*B, window_size, window_size, C
-            else:
-                x_windows = WindowProcess.apply(x, B, H, W, C, -self.shift_size, self.window_size)
+            shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size, -self.shift_size), dims=(1, 2, 3))
+            # partition windows
+            x_windows = window_partition(shifted_x, self.window_size)  # nW*B, window_size, window_size, window_size, C
         else:
             shifted_x = x
             # partition windows
-            x_windows = window_partition(shifted_x, self.window_size)  # nW*B, window_size, window_size, C
+            x_windows = window_partition(shifted_x, self.window_size)  # nW*B, window_size, window_size, window_size, C
 
-        x_windows = x_windows.view(-1, self.window_size * self.window_size, C)  # nW*B, window_size*window_size, C
+        x_windows = x_windows.view(-1, self.window_size * self.window_size * self.window_size, C)  # nW*B, window_size*window_size*window_size, C
 
         # W-MSA/SW-MSA
-        attn_windows = self.attn(x_windows, mask=self.attn_mask)  # nW*B, window_size*window_size, C
+        attn_windows = self.attn(x_windows, mask=self.attn_mask)  # nW*B, window_size*window_size*window_size, C
 
         # merge windows
-        attn_windows = attn_windows.view(-1, self.window_size, self.window_size, C)
+        attn_windows = attn_windows.view(-1, self.window_size, self.window_size, self.window_size, C)
 
         # reverse cyclic shift
         if self.shift_size > 0:
-            if not self.fused_window_process:
-                shifted_x = window_reverse(attn_windows, self.window_size, H, W)  # B H' W' C
-                x = torch.roll(shifted_x, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
-            else:
-                x = WindowProcessReverse.apply(attn_windows, B, H, W, C, self.shift_size, self.window_size)
+            shifted_x = window_reverse(attn_windows, self.window_size, H, W, D)  # B H' W' D' C
+            x = torch.roll(shifted_x, shifts=(self.shift_size, self.shift_size, self.shift_size), dims=(1, 2, 3))
         else:
-            shifted_x = window_reverse(attn_windows, self.window_size, H, W)  # B H' W' C
+            shifted_x = window_reverse(attn_windows, self.window_size, H, W, D)  # B H' W' D' C
             x = shifted_x
-        x = x.view(B, H * W, C)
+        x = x.view(B, H * W * D, C)
         x = shortcut + self.drop_path(x)
 
         # FFN
@@ -285,19 +283,19 @@ class SwinTransformerBlock(nn.Module):
         return f"dim={self.dim}, input_resolution={self.input_resolution}, num_heads={self.num_heads}, " \
                f"window_size={self.window_size}, shift_size={self.shift_size}, mlp_ratio={self.mlp_ratio}"
 
-    def flops(self):
-        flops = 0
-        H, W = self.input_resolution
-        # norm1
-        flops += self.dim * H * W
-        # W-MSA/SW-MSA
-        nW = H * W / self.window_size / self.window_size
-        flops += nW * self.attn.flops(self.window_size * self.window_size)
-        # mlp
-        flops += 2 * H * W * self.dim * self.dim * self.mlp_ratio
-        # norm2
-        flops += self.dim * H * W
-        return flops
+    # def flops(self):
+    #     flops = 0
+    #     H, W = self.input_resolution
+    #     # norm1
+    #     flops += self.dim * H * W
+    #     # W-MSA/SW-MSA
+    #     nW = H * W / self.window_size / self.window_size
+    #     flops += nW * self.attn.flops(self.window_size * self.window_size)
+    #     # mlp
+    #     flops += 2 * H * W * self.dim * self.dim * self.mlp_ratio
+    #     # norm2
+    #     flops += self.dim * H * W
+    #     return flops
 
 
 class PatchMerging(nn.Module):
