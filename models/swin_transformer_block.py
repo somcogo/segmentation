@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
-from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+import torch.nn.functional as F
+from timm.models.layers import DropPath, to_3tuple, trunc_normal_
 
 import os, sys
 
@@ -199,7 +200,7 @@ class SwinTransformerBlock(nn.Module):
 
         self.norm1 = norm_layer(dim)
         self.attn = WindowAttention(
-            dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
+            dim, window_size=to_3tuple(self.window_size), num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -310,26 +311,30 @@ class PatchMerging(nn.Module):
         super().__init__()
         self.input_resolution = input_resolution
         self.dim = dim
-        self.reduction = nn.Linear(4 * dim, 2 * dim, bias=False)
-        self.norm = norm_layer(4 * dim)
+        self.reduction = nn.Linear(8 * dim, 2 * dim, bias=False)
+        self.norm = norm_layer(8 * dim)
 
     def forward(self, x):
         """
-        x: B, H*W, C
+        x: B, H*W*D, C
         """
-        H, W = self.input_resolution
+        H, W, D = self.input_resolution
         B, L, C = x.shape
-        assert L == H * W, "input feature has wrong size"
-        assert H % 2 == 0 and W % 2 == 0, f"x size ({H}*{W}) are not even."
+        assert L == H * W * D, "input feature has wrong size"
+        assert H % 2 == 0 and W % 2 == 0 and D % 2 == 0, f"x size ({H}*{W}*{D}) are not even."
 
-        x = x.view(B, H, W, C)
+        x = x.view(B, H, W, D, C)
 
-        x0 = x[:, 0::2, 0::2, :]  # B H/2 W/2 C
-        x1 = x[:, 1::2, 0::2, :]  # B H/2 W/2 C
-        x2 = x[:, 0::2, 1::2, :]  # B H/2 W/2 C
-        x3 = x[:, 1::2, 1::2, :]  # B H/2 W/2 C
-        x = torch.cat([x0, x1, x2, x3], -1)  # B H/2 W/2 4*C
-        x = x.view(B, -1, 4 * C)  # B H/2*W/2 4*C
+        x0 = x[:, 0::2, 0::2, 0::2, :]  # B H/2 W/2 D/2 C
+        x1 = x[:, 1::2, 0::2, 0::2, :]  # B H/2 W/2 D/2 C
+        x2 = x[:, 0::2, 1::2, 0::2, :]  # B H/2 W/2 D/2 C
+        x3 = x[:, 1::2, 1::2, 0::2, :]  # B H/2 W/2 D/2 C
+        x4 = x[:, 0::2, 0::2, 1::2, :]  # B H/2 W/2 D/2 C
+        x5 = x[:, 1::2, 0::2, 1::2, :]  # B H/2 W/2 D/2 C
+        x6 = x[:, 0::2, 1::2, 1::2, :]  # B H/2 W/2 D/2 C
+        x7 = x[:, 1::2, 1::2, 1::2, :]  # B H/2 W/2 D/2 C
+        x = torch.cat([x0, x1, x2, x3, x4, x5, x6, x7], -1)  # B H/2 W/2 D/2 8*C
+        x = x.view(B, -1, 8 * C)  # B H/2*W/2*D/2 8*C
 
         x = self.norm(x)
         x = self.reduction(x)
@@ -339,11 +344,11 @@ class PatchMerging(nn.Module):
     def extra_repr(self) -> str:
         return f"input_resolution={self.input_resolution}, dim={self.dim}"
 
-    def flops(self):
-        H, W = self.input_resolution
-        flops = H * W * self.dim
-        flops += (H // 2) * (W // 2) * 4 * self.dim * 2 * self.dim
-        return flops
+    # def flops(self):
+    #     H, W = self.input_resolution
+    #     flops = H * W * self.dim
+    #     flops += (H // 2) * (W // 2) * 4 * self.dim * 2 * self.dim
+    #     return flops
 
 
 class BasicLayer(nn.Module):
@@ -409,13 +414,13 @@ class BasicLayer(nn.Module):
     def extra_repr(self) -> str:
         return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
 
-    def flops(self):
-        flops = 0
-        for blk in self.blocks:
-            flops += blk.flops()
-        if self.downsample is not None:
-            flops += self.downsample.flops()
-        return flops
+    # def flops(self):
+    #     flops = 0
+    #     for blk in self.blocks:
+    #         flops += blk.flops()
+    #     if self.downsample is not None:
+    #         flops += self.downsample.flops()
+    #     return flops
 
 
 class PatchEmbed(nn.Module):
@@ -430,39 +435,39 @@ class PatchEmbed(nn.Module):
 
     def __init__(self, img_size=224, patch_size=4, in_chans=3, embed_dim=96, norm_layer=None):
         super().__init__()
-        img_size = to_2tuple(img_size)
-        patch_size = to_2tuple(patch_size)
-        patches_resolution = [img_size[0] // patch_size[0], img_size[1] // patch_size[1]]
+        img_size = to_3tuple(img_size)
+        patch_size = to_3tuple(patch_size)
+        patches_resolution = [img_size[0] // patch_size[0], img_size[1] // patch_size[1], img_size[2] // patch_size[2]]
         self.img_size = img_size
         self.patch_size = patch_size
         self.patches_resolution = patches_resolution
-        self.num_patches = patches_resolution[0] * patches_resolution[1]
+        self.num_patches = patches_resolution[0] * patches_resolution[1] * patches_resolution[2]
 
         self.in_chans = in_chans
         self.embed_dim = embed_dim
 
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
         else:
             self.norm = None
 
     def forward(self, x):
-        B, C, H, W = x.shape
+        B, C, H, W, D = x.shape
         # FIXME look at relaxing size constraints
-        assert H == self.img_size[0] and W == self.img_size[1], \
-            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        x = self.proj(x).flatten(2).transpose(1, 2)  # B Ph*Pw C
+        assert H == self.img_size[0] and W == self.img_size[1] and D == self.img_size[2], \
+            f"Input image size ({H}*{W}*{D}) doesn't match model ({self.img_size[0]}*{self.img_size[1]}*{self.img_size[2]})."
+        x = self.proj(x).flatten(2).transpose(1, 2)  # B Ph*Pw*Pd C
         if self.norm is not None:
             x = self.norm(x)
         return x
 
-    def flops(self):
-        Ho, Wo = self.patches_resolution
-        flops = Ho * Wo * self.embed_dim * self.in_chans * (self.patch_size[0] * self.patch_size[1])
-        if self.norm is not None:
-            flops += Ho * Wo * self.embed_dim
-        return flops
+    # def flops(self):
+    #     Ho, Wo = self.patches_resolution
+    #     flops = Ho * Wo * self.embed_dim * self.in_chans * (self.patch_size[0] * self.patch_size[1])
+    #     if self.norm is not None:
+    #         flops += Ho * Wo * self.embed_dim
+    #     return flops
 
 
 class SwinTransformer(nn.Module):
@@ -530,7 +535,8 @@ class SwinTransformer(nn.Module):
         for i_layer in range(self.num_layers):
             layer = BasicLayer(dim=int(embed_dim * 2 ** i_layer),
                                input_resolution=(patches_resolution[0] // (2 ** i_layer),
-                                                 patches_resolution[1] // (2 ** i_layer)),
+                                                 patches_resolution[1] // (2 ** i_layer),
+                                                 patches_resolution[2] // (2 ** i_layer)),
                                depth=depths[i_layer],
                                num_heads=num_heads[i_layer],
                                window_size=window_size,
@@ -539,14 +545,16 @@ class SwinTransformer(nn.Module):
                                drop=drop_rate, attn_drop=attn_drop_rate,
                                drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],
                                norm_layer=norm_layer,
-                               downsample=PatchMerging if (i_layer < self.num_layers - 1) else None,
+                               downsample=PatchMerging,
                                use_checkpoint=use_checkpoint,
                                fused_window_process=fused_window_process)
             self.layers.append(layer)
 
-        self.norm = norm_layer(self.num_features)
-        self.avgpool = nn.AdaptiveAvgPool1d(1)
-        self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
+        # # build norms
+        # self.norms = nn.ModuleList()
+        # for i_layer in range(self.num_layers):
+        #     norm = nn.LayerNorm(embed_dim * 2 ** i_layer)
+        #     self.norms.append(norm)
 
         self.apply(self._init_weights)
 
@@ -567,30 +575,26 @@ class SwinTransformer(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table'}
 
-    def forward_features(self, x):
+    def forward(self, x):
         x = self.patch_embed(x)
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
 
-        for layer in self.layers:
-            x = layer(x)
+        out = []
+        for i_layer in range(self.num_layers):
+            x = self.layers[i_layer](x)
+            B, L, C = x.size()
+            x = F.layer_norm(x, [C])
+            out.append(x)
 
-        x = self.norm(x)  # B L C
-        x = self.avgpool(x.transpose(1, 2))  # B C 1
-        x = torch.flatten(x, 1)
-        return x
+        return out
 
-    def forward(self, x):
-        x = self.forward_features(x)
-        x = self.head(x)
-        return x
-
-    def flops(self):
-        flops = 0
-        flops += self.patch_embed.flops()
-        for i, layer in enumerate(self.layers):
-            flops += layer.flops()
-        flops += self.num_features * self.patches_resolution[0] * self.patches_resolution[1] // (2 ** self.num_layers)
-        flops += self.num_features * self.num_classes
-        return flops
+    # def flops(self):
+    #     flops = 0
+    #     flops += self.patch_embed.flops()
+    #     for i, layer in enumerate(self.layers):
+    #         flops += layer.flops()
+    #     flops += self.num_features * self.patches_resolution[0] * self.patches_resolution[1] // (2 ** self.num_layers)
+    #     flops += self.num_features * self.num_classes
+    #     return flops

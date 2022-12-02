@@ -10,7 +10,7 @@ from scipy import ndimage
 import functools
 
 def getIdList():
-    raw_path_list = glob.glob('./data/altesCT/raw/*')
+    raw_path_list = glob.glob('/home/somahansel/work/data/test/raw/*')
     id_list = [os.path.split(path)[-1][:-7] for path in raw_path_list]
     return id_list
 
@@ -39,8 +39,8 @@ def getCenterCoords(img):
 
 @functools.lru_cache
 def getImages(id):
-    data = nib.load('./data/altesCT/raw/{}.nii.gz'.format(id))
-    data_mask = nib.load('./data/altesCT/mask/{}-labels.nii'.format(id))
+    data = nib.load('./data/test/raw/{}.nii.gz'.format(id))
+    data_mask = nib.load('./data/test/mask/{}-labels.nii'.format(id))
     img = data.get_fdata()
     mask = data_mask.get_fdata()
 
@@ -71,13 +71,13 @@ class SegmentationDataset(Dataset):
         return 1000
 
     def __getitem__(self, index):
-        id = self.id_list[index % 2]
+        id = self.id_list[0]
         img, mask = getImages(id)
         img = torch.tensor(img)
         img = (img - torch.mean(img)) / torch.std(img)
         mask = torch.tensor(mask)
-        mask = (mask - torch.mean(mask)) / torch.std(mask)
-        return img, mask
+        # mask = (mask - torch.mean(mask)) / torch.std(mask)
+        return img.unsqueeze(0).to(dtype=torch.float), mask.unsqueeze(0).to(dtype=torch.float)
 
 def getDataLoader(batch_size):
     train_ds = SegmentationDataset()
