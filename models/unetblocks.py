@@ -3,12 +3,12 @@ import torch.nn as nn
 
 class UNetConvBlock(nn.Module):
     def __init__(self, in_size, out_size):
-        super(self).__init__()
-        self.conv1 = nn.Conv3d(in_size, out_size, kernel_size=3, padding=True)
+        super().__init__()
+        self.conv1 = nn.Conv3d(in_size, out_size, kernel_size=3, padding=1)
         self.gelu = nn.GELU()
-        self.norm1 = nn.BatchNorm2d(out_size)
-        self.conv2 = nn.Conv2d(out_size, out_size, kernel_size=3, padding=True)
-        self.norm2 = nn.BatchNorm2d(out_size)
+        self.norm1 = nn.BatchNorm3d(out_size)
+        self.conv2 = nn.Conv3d(out_size, out_size, kernel_size=3, padding=1)
+        self.norm2 = nn.BatchNorm3d(out_size)
 
     def forward(self, x):
         out = self.conv1(x)
@@ -23,13 +23,15 @@ class UNetConvBlock(nn.Module):
 
 class UNetUpBlock(nn.Module):
     def __init__(self, in_size, out_size):
-        super(self).__init__()
-        self.up = nn.Sequential(nn.Upsample(mode='bilinear', scale_factor=2), nn.Conv2d(in_size, out_size, kernel_size=1))
+        super().__init__()
+        self.up = nn.Upsample(scale_factor=2, mode='trilinear')
+        self.conv = nn.Conv3d(in_size, out_size, kernel_size=1)
         self.conv_block = UNetConvBlock(in_size, out_size)
 
     def forward(self, x, bridge):
         up = self.up(x)
-        out = torch.cat([up, bridge], 1)
+        up = self.conv(up)
+        out = torch.cat([up, bridge], 0)
         out = self.conv_block(out)
 
         return out

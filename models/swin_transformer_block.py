@@ -582,11 +582,25 @@ class SwinTransformer(nn.Module):
         x = self.pos_drop(x)
 
         out = []
+        y = (x.view(-1,
+            self.patches_resolution[0],
+            self.patches_resolution[1],
+            self.patches_resolution[2],
+            self.embed_dim))
+        y = y.permute(0, 4, 1, 2, 3)
+        out.append(y)
+
         for i_layer in range(self.num_layers):
             x = self.layers[i_layer](x)
             B, L, C = x.size()
             x = F.layer_norm(x, [C])
-            out.append(x)
+            y = x.view(-1,
+                self.patches_resolution[0] // (2 ** (i_layer + 1)),
+                self.patches_resolution[1] // (2 ** (i_layer + 1)),
+                self.patches_resolution[2] // (2 ** (i_layer + 1)),
+                C)
+            y = y.permute(0, 4, 1, 2, 3)
+            out.append(y)
 
         return out
 
