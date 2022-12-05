@@ -5,3 +5,8 @@ dummy.py
 lightning_logs
 utils/__pycache__/__init__.cpython-39.pyc
 utils/__pycache__/data_loader.cpython-39.pyc
+dummy.py
+models/__pycache__/__init__.cpython-39.pyc
+models/__pycache__/swin_transformer_block.cpython-39.pyc
+models/__pycache__/swinunetr.cpython-39.pyc
+models/__pycache__/unetblocks.cpython-39.pyc

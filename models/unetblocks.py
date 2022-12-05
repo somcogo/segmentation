@@ -17,7 +17,6 @@ class UNetConvBlock(nn.Module):
         out = self.conv2(out)
         out = self.gelu(out)
         out = self.norm2(out)
-        out += x
         return out
 
 
@@ -31,7 +30,7 @@ class UNetUpBlock(nn.Module):
     def forward(self, x, bridge):
         up = self.up(x)
         up = self.conv(up)
-        out = torch.cat([up, bridge], 0)
+        out = torch.cat([up, bridge], 1)
         out = self.conv_block(out)
 
         return out

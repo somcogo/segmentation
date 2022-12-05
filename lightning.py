@@ -66,8 +66,7 @@ logger = TensorBoardLogger(save_dir=os.getcwd(), version=1, name="lightning_logs
 
 # training
 trainer = pl.Trainer(
-	accelerator='gpu',
-	devices=1,
+	accelerator='cpu',
 	max_epochs=5,
 	limit_train_batches=0.5,
 	logger=logger

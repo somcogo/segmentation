@@ -1,10 +1,18 @@
-import nibabel as nib
-import os
-import matplotlib.pyplot as plt
-import csv
-import json
+from models.unetblocks import UNetConvBlock, UNetUpBlock
+from models.swinunetr import SwinUNETR
+import torch
 
-with open('./data/verse19/dataset-verse19test/derivatives/sub-verse032/sub-verse032_seg-vb_ctd.json') as f:
-    data = json.load(f)
-    for x in data[1:-1]:
-        print(x['label'])
+unet = UNetConvBlock(in_size=1, out_size=2)
+upblock = UNetUpBlock(in_size=16, out_size=8)
+unetr = SwinUNETR(img_size=64,
+		patch_size=8,
+		in_chans=1,
+		num_classes=2,
+		embed_dim=48,
+		window_size=2,
+		depths=[2, 2],
+		num_heads=[3, 6])
+x = torch.rand(8, 1, 64, 64, 64)
+y = torch.rand(8, 8, 32, 32, 32)
+z = unetr(x)
+print(z.size())
