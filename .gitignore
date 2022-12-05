@@ -2,3 +2,6 @@ data/
 runs/
 dummy.py
 dummy.py
+lightning_logs
+utils/__pycache__/__init__.cpython-39.pyc
+utils/__pycache__/data_loader.cpython-39.pyc
