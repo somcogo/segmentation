@@ -42,16 +42,20 @@ class SwinUNETRModule(pl.LightningModule):
 
 	def training_step(self, train_batch, batch_idx):
 		x, y = train_batch
-		out = self.swinunetr(x)
-		loss_fn = nn.MSELoss(reduction='mean')
-		loss = loss_fn(out, y)
+		features = self.swinunetr(x)
+		out = self.head(features)
+		loss_fn = nn.CrossEntropyLoss(reduction='sum')
+		y = y.long()
+		loss = loss_fn(out, y.squeeze())
 		return loss
 
 	def validation_step(self, val_batch, batch_idx):
 		x, y = val_batch
-		out = self.swinunetr(x)
-		loss_fn = nn.MSELoss(reduction='mean')
-		loss = loss_fn(out, y)
+		features = self.swinunetr(x)
+		out = self.head(features)
+		loss_fn = nn.CrossEntropyLoss(reduction='sum')
+		y = y.long()
+		loss = loss_fn(out.view(16, 2, -1), y.view(16, -1))
 		self.log('val_loss', loss)
 
 # data
@@ -59,15 +63,15 @@ train_loader = getDataLoader(16)
 val_loader = getDataLoader(16)
 
 # model
-model = SwinUNETRModule(img_size=64, patch_size=2, depths=[2], num_heads=[3])
+model = SwinUNETRModule(img_size=64, patch_size=2, embed_dim=24, depths=[2, 2, 2], num_heads=[3, 6, 12])
 
 # logger
 logger = TensorBoardLogger(save_dir=os.getcwd(), version=1, name="lightning_logs")
 
 # training
 trainer = pl.Trainer(
-	accelerator='cpu',
-	max_epochs=5,
+	accelerator='gpu',
+	max_epochs=100,
 	limit_train_batches=0.5,
 	logger=logger
 	)

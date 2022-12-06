@@ -21,11 +21,11 @@ class UNetConvBlock(nn.Module):
 
 
 class UNetUpBlock(nn.Module):
-    def __init__(self, in_size, out_size):
+    def __init__(self, in_size, out_size, scale_factor=2):
         super().__init__()
-        self.up = nn.Upsample(scale_factor=2, mode='trilinear')
+        self.up = nn.Upsample(scale_factor=scale_factor, mode='trilinear')
         self.conv = nn.Conv3d(in_size, out_size, kernel_size=1)
-        self.conv_block = UNetConvBlock(in_size, out_size)
+        self.conv_block = UNetConvBlock(out_size + out_size, out_size)
 
     def forward(self, x, bridge):
         up = self.up(x)

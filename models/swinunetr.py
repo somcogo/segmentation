@@ -41,10 +41,12 @@ class SwinUNETR(nn.Module):
 			if i == 0:
 				in_size=embed_dim
 				out_size=embed_dim
+				scale_factor = patch_size
 			else:
 				in_size=embed_dim * 2 ** (i)
 				out_size=embed_dim * 2 ** (i - 1)
-			decoder = UNetUpBlock(in_size=in_size, out_size=out_size)
+				scale_factor = 2
+			decoder = UNetUpBlock(in_size=in_size, out_size=out_size, scale_factor=scale_factor)
 			self.decoders.append(decoder)
 
 	def forward(self, x):
@@ -59,8 +61,8 @@ class SwinUNETR(nn.Module):
 		
 		for i in range(len(hidden_features)):
 			if i == 0:
-				dec.append(self.decoders[i](enc[-1], hidden_features[-2]))
+				dec.append(self.decoders[-i - 1](enc[-1], hidden_features[-2]))
 			else:
-				dec.append(self.decoders[i](dec[i - 1], enc[-i - 1]))
+				dec.append(self.decoders[-i - 1](dec[i - 1], enc[-i - 2]))
 
 		return dec[-1]
