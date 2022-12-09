@@ -9,6 +9,8 @@ from utils.data_loader import getDataLoader
 
 import os
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
+
 class SwinUNETRModule(pl.LightningModule):
 	def __init__(self,
 		img_size=64,
@@ -53,14 +55,17 @@ class SwinUNETRModule(pl.LightningModule):
 		loss_fn = nn.CrossEntropyLoss(reduction='sum')
 		y = y.long()
 		loss = loss_fn(out.view(1, 2, -1), y.view(1, -1))
-		self.log('val_loss', loss)
+		self.log('val_loss', loss, sync_dist=True)
 
 # data
 image_size = 64
-train_loader, val_loader = getDataLoader(batch_size=1, image_size=image_size)
+train_loader, val_loader = getDataLoader(
+	batch_size=1,
+	image_size=image_size,
+	persistent_workers=False)
 
 # model
-model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=24, depths=[2, 2, 2], num_heads=[3, 6, 12])
+model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=24, depths=[2, 2], num_heads=[3, 6])
 
 # logger
 logger = TensorBoardLogger(save_dir=os.getcwd(), version=3, name="lightning_logs")
@@ -68,9 +73,12 @@ logger = TensorBoardLogger(save_dir=os.getcwd(), version=3, name="lightning_logs
 # training
 trainer = pl.Trainer(
 	accelerator='gpu',
+	devices=2,
 	max_epochs=2,
-	limit_train_batches=0.5,
-	logger=logger
+	limit_train_batches=1.0,
+	logger=logger,
+	log_every_n_steps=10
 	)
-trainer.fit(model, train_loader, val_loader)
-    
+
+if __name__ == '__main__':
+    trainer.fit(model, train_loader, val_loader)
