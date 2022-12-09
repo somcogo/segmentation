@@ -31,6 +31,8 @@ class SwinUNETRModule(pl.LightningModule):
 			num_heads=num_heads,
 		)
 
+		self.head = nn.Conv3d(in_channels=embed_dim, out_channels=2, kernel_size=1)
+
 	def configure_optimizers(self):
 		optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
 		return optimizer
@@ -41,7 +43,7 @@ class SwinUNETRModule(pl.LightningModule):
 		out = self.head(features)
 		loss_fn = nn.CrossEntropyLoss(reduction='sum')
 		y = y.long()
-		loss = loss_fn(out, y.squeeze())
+		loss = loss_fn(out, y.squeeze(dim=1))
 		return loss
 
 	def validation_step(self, val_batch, batch_idx):
@@ -50,23 +52,23 @@ class SwinUNETRModule(pl.LightningModule):
 		out = self.head(features)
 		loss_fn = nn.CrossEntropyLoss(reduction='sum')
 		y = y.long()
-		loss = loss_fn(out.view(16, 2, -1), y.view(16, -1))
+		loss = loss_fn(out.view(1, 2, -1), y.view(1, -1))
 		self.log('val_loss', loss)
 
 # data
-train_loader = getDataLoader(16)
-val_loader = getDataLoader(16)
+image_size = 64
+train_loader, val_loader = getDataLoader(batch_size=1, image_size=image_size)
 
 # model
-model = SwinUNETRModule(img_size=64, patch_size=2, embed_dim=24, depths=[2, 2, 2], num_heads=[3, 6, 12])
+model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=24, depths=[2, 2, 2], num_heads=[3, 6, 12])
 
 # logger
-logger = TensorBoardLogger(save_dir=os.getcwd(), version=1, name="lightning_logs")
+logger = TensorBoardLogger(save_dir=os.getcwd(), version=3, name="lightning_logs")
 
 # training
 trainer = pl.Trainer(
 	accelerator='gpu',
-	max_epochs=100,
+	max_epochs=2,
 	limit_train_batches=0.5,
 	logger=logger
 	)
