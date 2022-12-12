@@ -9,7 +9,7 @@ from utils.data_loader import getDataLoader
 
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "6,7"
 
 class SwinUNETRModule(pl.LightningModule):
 	def __init__(self,
@@ -62,7 +62,7 @@ image_size = 64
 train_loader, val_loader = getDataLoader(
 	batch_size=1,
 	image_size=image_size,
-	persistent_workers=False)
+	persistent_workers=True)
 
 # model
 model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=24, depths=[2, 2], num_heads=[3, 6])
@@ -72,6 +72,7 @@ logger = TensorBoardLogger(save_dir=os.getcwd(), version=3, name="lightning_logs
 
 # training
 trainer = pl.Trainer(
+	strategy='ddp',
 	accelerator='gpu',
 	devices=2,
 	max_epochs=2,

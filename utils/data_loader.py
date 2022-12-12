@@ -11,7 +11,7 @@ from scipy import ndimage
 import functools
 
 def getTupleList():
-    raw_path_list_alt = glob.glob('../../data/test/mask/*')
+    raw_path_list_alt = glob.glob('../../data/altesCT_Segmentierung/*')
     raw_path_list_alt.sort()
     id_list_alt = [(os.path.split(path)[-1][:-14], 'altesCT') for path in raw_path_list_alt]
     id_list = id_list_alt
@@ -42,8 +42,8 @@ def getCenterCoords(img):
 
 @functools.lru_cache
 def getImages(id, scanner_version, image_size):
-    data = nib.load('../../data/test/raw/{}.nii.gz'.format(id))
-    data_mask = nib.load('../../data/test/mask/{}-labels.nii.gz'.format(id))
+    data = nib.load('../../data/{}/{}.nii.gz'.format(scanner_version,id))
+    data_mask = nib.load('../../data/{}_Segmentierung/{}-labels.nii.gz'.format(scanner_version, id))
     img = data.get_fdata()
     mask = data_mask.get_fdata()
 
@@ -86,10 +86,10 @@ class SegmentationDataset(Dataset):
 
 def getDataLoader(batch_size, image_size, persistent_workers=False):
     tuple_list = getTupleList()
-    tuple_list = tuple_list[:20]
+    tuple_list = tuple_list[:100]
     # train_list, val_list = train_test_split(tuple_list, test_size=0.1)
     train_ds = SegmentationDataset(tuple_list, image_size)
     val_ds = SegmentationDataset(tuple_list, image_size)
-    train_dl = DataLoader(train_ds, batch_size=batch_size, num_workers=0, drop_last=True, persistent_workers=persistent_workers)
-    val_dl = DataLoader(val_ds, batch_size=batch_size, num_workers=0, drop_last=True, persistent_workers=persistent_workers)
+    train_dl = DataLoader(train_ds, batch_size=batch_size, num_workers=4, drop_last=True, persistent_workers=persistent_workers)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, num_workers=4, drop_last=True, persistent_workers=persistent_workers)
     return train_dl, val_dl

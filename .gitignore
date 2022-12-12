@@ -24,3 +24,9 @@ utils/__pycache__/__init__.cpython-39.pyc
 lightning_logs
 .gitignore
 dummy.py
+models/__pycache__/swin_transformer_block.cpython-310.pyc
+models/__pycache__/__init__.cpython-310.pyc
+models/__pycache__/swinunetr.cpython-310.pyc
+models/__pycache__/unetblocks.cpython-310.pyc
+utils/__pycache__/__init__.cpython-310.pyc
+utils/__pycache__/data_loader.cpython-310.pyc
