@@ -5,7 +5,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from models.swin_transformer_block import SwinTransformer
 from models.unetblocks import UNetConvBlock, UNetUpBlock
 from models.swinunetr import SwinUNETR
-from utils.data_loader import getDataLoader
+from utils.data_loader import getDataLoader, getDataLoaderHDF5
 
 import os
 
@@ -59,13 +59,14 @@ class SwinUNETRModule(pl.LightningModule):
 
 # data
 image_size = 64
-train_loader, val_loader = getDataLoader(
-	batch_size=1,
+train_loader, val_loader = getDataLoaderHDF5(
+	batch_size=4,
 	image_size=image_size,
-	persistent_workers=True)
+	num_workers=0,
+	persistent_workers=False)
 
 # model
-model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=24, depths=[2, 2], num_heads=[3, 6])
+model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
 
 # logger
 logger = TensorBoardLogger(save_dir=os.getcwd(), version=3, name="lightning_logs")
