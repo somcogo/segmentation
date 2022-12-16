@@ -14,7 +14,7 @@ from models.swinunetr import SwinUNETR
 from utils.logconf import logging
 from utils.data_loader import getDataLoaderHDF5
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1, 2, 3"
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
 log.setLevel(logging.INFO)
@@ -33,6 +33,7 @@ class SegmentationTrainingApp:
         parser.add_argument("--lr", default=1e-3, type=float, help="learning rate")
         parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')
         parser.add_argument("--image_size", default=64, type=int, help="image size  used for learning")
+        parser.add_argument('--data_ratio', default=1.0, type=float, help="what ratio of data to use")
 
         self.args = parser.parse_args()
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
@@ -63,7 +64,7 @@ class SegmentationTrainingApp:
         return Adam(params=self.model.parameters(), lr=self.args.lr)
 
     def initDl(self):
-        return getDataLoaderHDF5(batch_size=self.args.batch_size, image_size=self.args.image_size, num_workers=64, persistent_workers=True)
+        return getDataLoaderHDF5(batch_size=self.args.batch_size, image_size=self.args.image_size, num_workers=64, data_ratio=self.args.data_ratio, persistent_workers=True)
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
