@@ -110,7 +110,8 @@ class SegmentationTrainingApp:
         self.model.train()
         trnMetrics = torch.zeros(len(train_dl), device=self.device)
 
-        log.warning('E{} Training ---/{} starting'.format(epoch_ndx, len(train_dl)))
+        if epoch_ndx < 10:
+            log.warning('E{} Training ---/{} starting'.format(epoch_ndx, len(train_dl)))
 
         for batch_ndx, batch_tuple in enumerate(train_dl):
             self.optimizer.zero_grad()
@@ -123,7 +124,7 @@ class SegmentationTrainingApp:
             loss.backward()
             self.optimizer.step()
 
-            if batch_ndx % 10 == 0:
+            if batch_ndx % 10 == 0 and epoch_ndx < 10:
                 log.info('E{} Training {}/{}'.format(epoch_ndx, batch_ndx, len(train_dl)))
 
         self.totalTrainingSamples_count += len(train_dl.dataset)
@@ -135,7 +136,8 @@ class SegmentationTrainingApp:
             self.model.eval()
             valMetrics = torch.zeros(len(val_dl), device=self.device)
 
-            log.warning('E{} Validation ---/{} starting'.format(epoch_ndx, len(val_dl)))
+            if epoch_ndx < 10:
+                log.warning('E{} Validation ---/{} starting'.format(epoch_ndx, len(val_dl)))
 
             for batch_ndx, batch_tuple in enumerate(val_dl):
                 val_loss, imgs = self.computeBatchLoss(
@@ -144,7 +146,7 @@ class SegmentationTrainingApp:
                     valMetrics,
                     need_imgs=True
                 )
-                if batch_ndx % 5 == 0:
+                if batch_ndx % 5 == 0 and epoch_ndx < 10:
                     log.info('E{} Validation {}/{}'.format(epoch_ndx, batch_ndx, len(val_dl)))
 
         return valMetrics.to('cpu'), val_loss, imgs
@@ -180,10 +182,11 @@ class SegmentationTrainingApp:
         img_list=None
     ):
         self.initTensorboardWriters()
-        log.info("E{} {}".format(
-            epoch_ndx,
-            type(self).__name__,
-        ))
+        if epoch_ndx < 10:
+            log.info("E{} {}".format(
+                epoch_ndx,
+                type(self).__name__,
+            ))
 
         log.info(
             "E{} {}:{} loss".format(
@@ -203,7 +206,7 @@ class SegmentationTrainingApp:
         if img_list:
             img_list = [img.unsqueeze(dim=0).unsqueeze(dim=0) for img in img_list]
             imgs = torch.concat(img_list, dim=0)
-            grid = torchvision.utils.make_grid(imgs, nrows=2)
+            grid = torchvision.utils.make_grid(imgs, nrow=3)
             writer.add_image('images',
                 grid,
                 global_step=self.totalTrainingSamples_count,
