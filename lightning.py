@@ -9,7 +9,7 @@ from utils.data_loader import getDataLoader, getDataLoaderHDF5
 
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "6,7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 class SwinUNETRModule(pl.LightningModule):
 	def __init__(self,
@@ -54,16 +54,16 @@ class SwinUNETRModule(pl.LightningModule):
 		out = self.head(features)
 		loss_fn = nn.CrossEntropyLoss(reduction='sum')
 		y = y.long()
-		loss = loss_fn(out.view(1, 2, -1), y.view(1, -1))
+		loss = loss_fn(out, y.squeeze(dim=1))
 		self.log('val_loss', loss, sync_dist=True)
 
 # data
 image_size = 64
 train_loader, val_loader = getDataLoaderHDF5(
-	batch_size=4,
+	batch_size=16,
 	image_size=image_size,
-	num_workers=0,
-	persistent_workers=False)
+	num_workers=64,
+	persistent_workers=True)
 
 # model
 model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
@@ -75,7 +75,6 @@ logger = TensorBoardLogger(save_dir=os.getcwd(), version=3, name="lightning_logs
 trainer = pl.Trainer(
 	strategy='ddp',
 	accelerator='gpu',
-	devices=2,
 	max_epochs=2,
 	limit_train_batches=1.0,
 	logger=logger,

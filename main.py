@@ -10,17 +10,17 @@ from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 
-from models.model import SampleModel
+from models.swinunetr import SwinUNETR
 from utils.logconf import logging
-from utils.data_loader import get_loader
-from utils.losses import SampleLoss
+from utils.data_loader import getDataLoaderHDF5
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
 log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
-class SampleTrainingApp:
+class SegmentationTrainingApp:
     def __init__(self, sys_argv=None):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
@@ -32,12 +32,13 @@ class SampleTrainingApp:
         parser.add_argument("--in_channels", default=1, type=int, help="number of image channels")
         parser.add_argument("--lr", default=1e-3, type=float, help="learning rate")
         parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')
+        parser.add_argument("--image_size", default=64, type=int, help="image size  used for learning")
 
         self.args = parser.parse_args()
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
-        self.logdir = './runs/' + self.args.logdir
+        self.logdir = os.path.join('./runs', self.args.logdir)
         os.makedirs(self.logdir, exist_ok=True)
 
         self.trn_writer = None
@@ -48,7 +49,9 @@ class SampleTrainingApp:
         self.optimizer = self.initOptimizer()
 
     def initModel(self):
-        model = SampleModel()
+        model = SwinUNETR(img_size=self.args.image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
+        param_num = sum(p.numel() for p in model.parameters())
+        log.info('Initiated model with {} params'.format(param_num))
         if self.use_cuda:
             log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
             if torch.cuda.device_count() > 1:
@@ -60,14 +63,14 @@ class SampleTrainingApp:
         return Adam(params=self.model.parameters(), lr=self.args.lr)
 
     def initDl(self):
-        return get_loader(self.args.batch_size)
+        return getDataLoaderHDF5(batch_size=self.args.batch_size, image_size=self.args.image_size, num_workers=64, persistent_workers=True)
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
             self.trn_writer = SummaryWriter(
-                log_dir=self.args.logdir + '-trn-' + self.args.comment)
+                log_dir=self.logdir + '/trn-' + self.args.comment)
             self.val_writer = SummaryWriter(
-                log_dir=self.args.logdir + '-val-' + self.args.comment)
+                log_dir=self.logdir + '/val-' + self.args.comment)
 
     def main(self):
         log.info("Starting {}, {}".format(type(self).__name__, self.args))
@@ -91,11 +94,11 @@ class SampleTrainingApp:
             self.logMetrics(epoch_ndx, 'trn', trnMetrics)
 
             if epoch_ndx == 1 or epoch_ndx % validation_cadence == 0:
-                valMetrics, val_loss, img_list = self.doValidation(epoch_ndx, val_dl)
-                self.logMetrics(epoch_ndx, 'val', valMetrics, img_list=img_list)
+                valMetrics, val_loss, imgs = self.doValidation(epoch_ndx, val_dl)
+                self.logMetrics(epoch_ndx, 'val', valMetrics, imgs)
                 val_best = min(val_loss, val_best)
 
-                self.saveModel('mnist', epoch_ndx, val_loss == val_best)
+                self.saveModel('segmentation', epoch_ndx, val_loss == val_best)
 
         if hasattr(self, 'trn_writer'):
             self.trn_writer.close()
@@ -103,7 +106,7 @@ class SampleTrainingApp:
 
     def doTraining(self, epoch_ndx, train_dl):
         self.model.train()
-        trnMetrics = torch.zeros(3, len(train_dl), device=self.device)
+        trnMetrics = torch.zeros(len(train_dl), device=self.device)
 
         log.warning('E{} Training ---/{} starting'.format(epoch_ndx, len(train_dl)))
 
@@ -118,7 +121,7 @@ class SampleTrainingApp:
             loss.backward()
             self.optimizer.step()
 
-            if batch_ndx % 100 == 0:
+            if batch_ndx % 10 == 0:
                 log.info('E{} Training {}/{}'.format(epoch_ndx, batch_ndx, len(train_dl)))
 
         self.totalTrainingSamples_count += len(train_dl.dataset)
@@ -128,39 +131,45 @@ class SampleTrainingApp:
     def doValidation(self, epoch_ndx, val_dl):
         with torch.no_grad():
             self.model.eval()
-            valMetrics = torch.zeros(3, len(val_dl), device=self.device)
+            valMetrics = torch.zeros(len(val_dl), device=self.device)
 
             log.warning('E{} Validation ---/{} starting'.format(epoch_ndx, len(val_dl)))
 
             for batch_ndx, batch_tuple in enumerate(val_dl):
-                val_loss, img_list = self.computeBatchLoss(
+                val_loss, imgs = self.computeBatchLoss(
                     batch_ndx,
                     batch_tuple,
                     valMetrics,
                     need_imgs=True
                 )
-                if batch_ndx % 50 == 0:
+                if batch_ndx % 5 == 0:
                     log.info('E{} Validation {}/{}'.format(epoch_ndx, batch_ndx, len(val_dl)))
 
-        return valMetrics.to('cpu'), val_loss, img_list
+        return valMetrics.to('cpu'), val_loss, imgs
 
     def computeBatchLoss(self, batch_ndx, batch_tup, metrics, need_imgs=False):
-        batch, labels = batch_tup
+        batch, masks = batch_tup
         batch = batch.to(device=self.device, non_blocking=True)
+        masks = masks.to(device=self.device, non_blocking=True)
+        masks = masks.long()
+        prediction = self.model(batch)
 
-        loss_fn = SampleLoss()
-        loss, loss_tasks = loss_fn(batch, labels)
+        loss_fn = nn.CrossEntropyLoss(reduction='mean')
+        loss = loss_fn(prediction, masks.squeeze(dim=1))
 
-        metrics[:, batch_ndx] = torch.FloatTensor([
-            loss.detach(),
-            loss_tasks[0].detach(),
-            loss_tasks[1].detach()
-        ])
+        metrics[batch_ndx] = loss.detach()
 
         if need_imgs:
-            img1 = 0
-            img2 = 0
-            return loss.mean(), [img1, img2]
+            original1 = batch[0, 0, :, :, self.args.image_size // 2]
+            original2 = batch[0, 0,:, self.args.image_size // 2, :]
+            original3 = batch[0, 0, self.args.image_size // 2, :, :]
+            predicted1 = prediction[0, 0, :, :, self.args.image_size // 2]
+            predicted2 = prediction[0, 0, :, self.args.image_size // 2, :]
+            predicted3 = prediction[0, 0, self.args.image_size // 2, :, :]
+            ground_truth1 = masks[0, 0, :, :, self.args.image_size // 2]
+            ground_truth2 = masks[0, 0, :, self.args.image_size // 2, :]
+            ground_truth3 = masks[0, 0, self.args.image_size // 2, :, :]
+            return loss.mean(), [original1, original2, original3, predicted1, predicted2, predicted3, ground_truth1, ground_truth2, ground_truth3]
         else:
             return loss.mean()
 
@@ -178,45 +187,77 @@ class SampleTrainingApp:
         ))
 
         log.info(
-            "E{} {}:{} loss, {} reconstruction loss, {} contrastive loss".format(
+            "E{} {}:{} loss".format(
                 epoch_ndx,
                 mode_str,
-                metrics[0].mean(),
-                metrics[1].mean(),
-                metrics[2].mean()
+                metrics.mean()
             )
         )
 
         writer = getattr(self, mode_str + '_writer')
         writer.add_scalar(
             'loss_total',
-            scalar_value=metrics[0].mean(),
-            global_step=self.totalTrainingSamples_count
-        )
-        writer.add_scalar(
-            'loss_recon',
-            scalar_value=metrics[1].mean(),
-            global_step=self.totalTrainingSamples_count
-        )
-        writer.add_scalar(
-            'loss_contr',
-            scalar_value=metrics[2].mean(),
+            scalar_value=metrics.mean(),
             global_step=self.totalTrainingSamples_count
         )
 
         if img_list:
             writer.add_image(
-                'aug',
+                'original1',
                 img_list[0],
                 global_step=self.totalTrainingSamples_count,
                 dataformats='HW'
             )
             writer.add_image(
-                'recon',
+                'original2',
                 img_list[1],
                 global_step=self.totalTrainingSamples_count,
                 dataformats='HW'
             )
+            writer.add_image(
+                'original3',
+                img_list[2],
+                global_step=self.totalTrainingSamples_count,
+                dataformats='HW'
+            )
+            writer.add_image(
+                'predicted1',
+                img_list[3],
+                global_step=self.totalTrainingSamples_count,
+                dataformats='HW'
+            )
+            writer.add_image(
+                'predicted2',
+                img_list[4],
+                global_step=self.totalTrainingSamples_count,
+                dataformats='HW'
+            )
+            writer.add_image(
+                'predicted3',
+                img_list[5],
+                global_step=self.totalTrainingSamples_count,
+                dataformats='HW'
+            )
+            writer.add_image(
+                'ground truth1',
+                img_list[6],
+                global_step=self.totalTrainingSamples_count,
+                dataformats='HW'
+            )
+            writer.add_image(
+                'ground truth2',
+                img_list[7],
+                global_step=self.totalTrainingSamples_count,
+                dataformats='HW'
+            )
+            writer.add_image(
+                'ground truth3',
+                img_list[8],
+                global_step=self.totalTrainingSamples_count,
+                dataformats='HW'
+            )
+
+        writer.flush()
 
     def saveModel(self, type_str, epoch_ndx, isBest=False):
         file_path = os.path.join(
@@ -265,4 +306,4 @@ class SampleTrainingApp:
             log.debug("Saved model params to {}".format(best_path))
 
 if __name__ == '__main__':
-    SampleTrainingApp().main()
+    SegmentationTrainingApp().main()

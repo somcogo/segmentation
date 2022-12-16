@@ -62,9 +62,9 @@ class SegmentationDatasetHDF5(Dataset):
 def getDataLoaderHDF5(batch_size, image_size, num_workers, persistent_workers=False):
     tuple_list = getTupleListHDF5()
     tuple_list = tuple_list
-    # train_list, val_list = train_test_split(tuple_list, test_size=0.1)
-    train_ds = SegmentationDatasetHDF5(tuple_list, image_size)
-    val_ds = SegmentationDatasetHDF5(tuple_list, image_size)
+    train_list, val_list = train_test_split(tuple_list, test_size=0.1, shuffle=False)
+    train_ds = SegmentationDatasetHDF5(train_list, image_size)
+    val_ds = SegmentationDatasetHDF5(val_list, image_size)
     train_dl = DataLoader(train_ds, batch_size=batch_size, num_workers=num_workers, drop_last=True, persistent_workers=persistent_workers)
     val_dl = DataLoader(val_ds, batch_size=batch_size, num_workers=num_workers, drop_last=True, persistent_workers=persistent_workers, shuffle=False)
     return train_dl, val_dl
@@ -151,7 +151,7 @@ class SegmentationDataset(Dataset):
 def getDataLoader(batch_size, image_size, persistent_workers=False):
     tuple_list = getTupleList()
     tuple_list = tuple_list
-    train_list, val_list = train_test_split(tuple_list, test_size=0.1)
+    train_list, val_list = train_test_split(tuple_list, test_size=0.1, shuffle=False)
     train_ds = SegmentationDataset(train_list, image_size)
     val_ds = SegmentationDataset(val_list, image_size)
     train_dl = DataLoader(train_ds, batch_size=batch_size, num_workers=4, drop_last=True, persistent_workers=persistent_workers)
