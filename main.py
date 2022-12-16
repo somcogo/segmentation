@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
+import torchvision
 import numpy as np
 
 from models.swinunetr import SwinUNETR
@@ -27,7 +28,7 @@ class SegmentationTrainingApp:
 
         parser = argparse.ArgumentParser(description="Test training")
         parser.add_argument("--epochs", default=10, type=int, help="number of training epochs")
-        parser.add_argument("--batch_size", default=16, type=int, help="number of batch size")
+        parser.add_argument("--batch_size", default=1, type=int, help="number of batch size")
         parser.add_argument("--logdir", default="test", type=str, help="directory to save the tensorboard logs")
         parser.add_argument("--in_channels", default=1, type=int, help="number of image channels")
         parser.add_argument("--lr", default=1e-3, type=float, help="learning rate")
@@ -160,16 +161,13 @@ class SegmentationTrainingApp:
         metrics[batch_ndx] = loss.detach()
 
         if need_imgs:
-            original1 = batch[0, 0, :, :, self.args.image_size // 2]
-            original2 = batch[0, 0,:, self.args.image_size // 2, :]
-            original3 = batch[0, 0, self.args.image_size // 2, :, :]
             predicted1 = prediction[0, 0, :, :, self.args.image_size // 2]
             predicted2 = prediction[0, 0, :, self.args.image_size // 2, :]
             predicted3 = prediction[0, 0, self.args.image_size // 2, :, :]
             ground_truth1 = masks[0, 0, :, :, self.args.image_size // 2]
             ground_truth2 = masks[0, 0, :, self.args.image_size // 2, :]
             ground_truth3 = masks[0, 0, self.args.image_size // 2, :, :]
-            return loss.mean(), [original1, original2, original3, predicted1, predicted2, predicted3, ground_truth1, ground_truth2, ground_truth3]
+            return loss.mean(), [predicted1, predicted2, predicted3, ground_truth1, ground_truth2, ground_truth3]
         else:
             return loss.mean()
 
@@ -202,60 +200,13 @@ class SegmentationTrainingApp:
         )
 
         if img_list:
-            writer.add_image(
-                'original1',
-                img_list[0],
+            img_list = [img.unsqueeze(dim=0).unsqueeze(dim=0) for img in img_list]
+            imgs = torch.concat(img_list, dim=0)
+            grid = torchvision.utils.make_grid(imgs, nrows=2)
+            writer.add_image('images',
+                grid,
                 global_step=self.totalTrainingSamples_count,
-                dataformats='HW'
-            )
-            writer.add_image(
-                'original2',
-                img_list[1],
-                global_step=self.totalTrainingSamples_count,
-                dataformats='HW'
-            )
-            writer.add_image(
-                'original3',
-                img_list[2],
-                global_step=self.totalTrainingSamples_count,
-                dataformats='HW'
-            )
-            writer.add_image(
-                'predicted1',
-                img_list[3],
-                global_step=self.totalTrainingSamples_count,
-                dataformats='HW'
-            )
-            writer.add_image(
-                'predicted2',
-                img_list[4],
-                global_step=self.totalTrainingSamples_count,
-                dataformats='HW'
-            )
-            writer.add_image(
-                'predicted3',
-                img_list[5],
-                global_step=self.totalTrainingSamples_count,
-                dataformats='HW'
-            )
-            writer.add_image(
-                'ground truth1',
-                img_list[6],
-                global_step=self.totalTrainingSamples_count,
-                dataformats='HW'
-            )
-            writer.add_image(
-                'ground truth2',
-                img_list[7],
-                global_step=self.totalTrainingSamples_count,
-                dataformats='HW'
-            )
-            writer.add_image(
-                'ground truth3',
-                img_list[8],
-                global_step=self.totalTrainingSamples_count,
-                dataformats='HW'
-            )
+                dataformats='CHW')
 
         writer.flush()
 
