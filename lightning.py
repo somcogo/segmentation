@@ -5,9 +5,12 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from models.swin_transformer_block import SwinTransformer
 from models.unetblocks import UNetConvBlock, UNetUpBlock
 from models.swinunetr import SwinUNETR
-from utils.data_loader import getDataLoader
+from utils.data_loader import getDataLoader, getDataLoaderHDF5
 
 import os
+from time import time
+
+t1 = time()
 
 class SwinUNETRModule(pl.LightningModule):
 	def __init__(self,
@@ -57,10 +60,10 @@ class SwinUNETRModule(pl.LightningModule):
 
 # data
 image_size = 64
-train_loader, val_loader = getDataLoader(batch_size=1, image_size=image_size)
+train_loader, val_loader = getDataLoaderHDF5(batch_size=1, image_size=image_size, num_workers=24)
 
 # model
-model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=24, depths=[2, 2, 2], num_heads=[3, 6, 12])
+model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
 
 # logger
 logger = TensorBoardLogger(save_dir=os.getcwd(), version=3, name="lightning_logs")
@@ -69,8 +72,12 @@ logger = TensorBoardLogger(save_dir=os.getcwd(), version=3, name="lightning_logs
 trainer = pl.Trainer(
 	accelerator='gpu',
 	max_epochs=2,
-	limit_train_batches=0.5,
-	logger=logger
+	limit_train_batches=1.0,
+	logger=logger,
+	log_every_n_steps=10,
 	)
 trainer.fit(model, train_loader, val_loader)
+
+t2 = time()
+print(t2 - t1)
     
