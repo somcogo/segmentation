@@ -15,7 +15,7 @@ from models.swinunetr import SwinUNETR
 from utils.logconf import logging
 from utils.data_loader import getDataLoaderHDF5
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1, 2, 3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4, 6"
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
 log.setLevel(logging.INFO)
@@ -28,7 +28,7 @@ class SegmentationTrainingApp:
 
         parser = argparse.ArgumentParser(description="Test training")
         parser.add_argument("--epochs", default=10, type=int, help="number of training epochs")
-        parser.add_argument("--batch_size", default=1, type=int, help="number of batch size")
+        parser.add_argument("--batch_size", default=16, type=int, help="number of batch size")
         parser.add_argument("--logdir", default="test", type=str, help="directory to save the tensorboard logs")
         parser.add_argument("--in_channels", default=1, type=int, help="number of image channels")
         parser.add_argument("--lr", default=1e-3, type=float, help="learning rate")
@@ -82,22 +82,24 @@ class SegmentationTrainingApp:
         val_best = 1e8
         validation_cadence = 5
         for epoch_ndx in range(1, self.args.epochs + 1):
+            logging_index = (epoch_ndx < 10) or (epoch_ndx % 5 == 0 and epoch_ndx < 50) or (epoch_ndx % 50 == 0 and epoch_ndx < 500) or epoch_ndx % 250 == 0
 
-            log.info("Epoch {} of {}, {}/{} batches of size {}*{}".format(
-                epoch_ndx,
-                self.args.epochs,
-                len(train_dl),
-                len(val_dl),
-                self.args.batch_size,
-                (torch.cuda.device_count() if self.use_cuda else 1),
-            ))
+            if logging_index:
+                log.info("Epoch {} of {}, {}/{} batches of size {}*{}".format(
+                    epoch_ndx,
+                    self.args.epochs,
+                    len(train_dl),
+                    len(val_dl),
+                    self.args.batch_size,
+                    (torch.cuda.device_count() if self.use_cuda else 1),
+                ))
 
             trnMetrics = self.doTraining(epoch_ndx, train_dl)
-            self.logMetrics(epoch_ndx, 'trn', trnMetrics)
+            self.logMetrics(epoch_ndx, 'trn', trnMetrics, logging_index=logging_index)
 
             if epoch_ndx == 1 or epoch_ndx % validation_cadence == 0:
                 valMetrics, val_loss, imgs = self.doValidation(epoch_ndx, val_dl)
-                self.logMetrics(epoch_ndx, 'val', valMetrics, imgs)
+                self.logMetrics(epoch_ndx, 'val', valMetrics, imgs, logging_index)
                 val_best = min(val_loss, val_best)
 
                 self.saveModel('segmentation', epoch_ndx, val_loss == val_best)
@@ -108,7 +110,7 @@ class SegmentationTrainingApp:
 
     def doTraining(self, epoch_ndx, train_dl):
         self.model.train()
-        trnMetrics = torch.zeros(len(train_dl), device=self.device)
+        trnMetrics = torch.zeros(13, len(train_dl.dataset), device=self.device)
 
         if epoch_ndx < 10:
             log.warning('E{} Training ---/{} starting'.format(epoch_ndx, len(train_dl)))
@@ -119,6 +121,7 @@ class SegmentationTrainingApp:
             loss = self.computeBatchLoss(
                 batch_ndx,
                 batch_tuple,
+                self.args.batch_size,
                 trnMetrics)
 
             loss.backward()
@@ -134,7 +137,7 @@ class SegmentationTrainingApp:
     def doValidation(self, epoch_ndx, val_dl):
         with torch.no_grad():
             self.model.eval()
-            valMetrics = torch.zeros(len(val_dl), device=self.device)
+            valMetrics = torch.zeros(13, len(val_dl.dataset), device=self.device)
 
             if epoch_ndx < 10:
                 log.warning('E{} Validation ---/{} starting'.format(epoch_ndx, len(val_dl)))
@@ -143,6 +146,7 @@ class SegmentationTrainingApp:
                 val_loss, imgs = self.computeBatchLoss(
                     batch_ndx,
                     batch_tuple,
+                    self.args.batch_size,
                     valMetrics,
                     need_imgs=True
                 )
@@ -151,26 +155,66 @@ class SegmentationTrainingApp:
 
         return valMetrics.to('cpu'), val_loss, imgs
 
-    def computeBatchLoss(self, batch_ndx, batch_tup, metrics, need_imgs=False):
+    def computeBatchLoss(self, batch_ndx, batch_tup, batch_size, metrics, need_imgs=False):
         batch, masks = batch_tup
         batch = batch.to(device=self.device, non_blocking=True)
         masks = masks.to(device=self.device, non_blocking=True)
         masks = masks.long()
-        prediction = self.model(batch)
+        prediction, probabilities = self.model(batch)
 
-        loss_fn = nn.CrossEntropyLoss(reduction='mean')
+        loss_fn = nn.CrossEntropyLoss(reduction='none')
         loss = loss_fn(prediction, masks.squeeze(dim=1))
 
-        metrics[batch_ndx] = loss.detach()
+        pred_label = torch.argmax(probabilities, dim=1, keepdim=True, out=None)
+        pos_pred = pred_label > 0
+        neg_pred = ~pos_pred
+        pos_mask = masks > 0
+        neg_mask = ~pos_mask
+
+        neg_count = neg_mask.sum(dim=[1, 2, 3, 4]).int()
+        pos_count = pos_mask.sum(dim=[1, 2, 3, 4]).int()
+
+        true_pos = (pos_pred & pos_mask).sum(dim=[1, 2, 3, 4]).int()
+        true_neg = (neg_pred & neg_mask).sum(dim=[1, 2, 3, 4]).int()
+        false_pos = neg_count - true_neg
+        false_neg = pos_count - true_pos
+
+        dice_score = (2 * true_pos ) / (pos_count + neg_count)
+        precision = torch.zeros(masks.size(0))
+        precision = (true_pos + false_pos != 0) * true_pos / (true_pos + false_pos)
+        recall = true_pos / (true_pos + false_neg)
+
+        start_ndx = batch_ndx * batch_size
+        end_ndx = start_ndx + masks.size(0)
+
+        metrics[0, start_ndx:end_ndx] = loss.sum(dim=[1, 2, 3])
+        metrics[1, start_ndx:end_ndx] = true_pos
+        metrics[2, start_ndx:end_ndx] = true_neg
+        metrics[3, start_ndx:end_ndx] = false_pos
+        metrics[4, start_ndx:end_ndx] = false_neg
+        metrics[5, start_ndx:end_ndx] = dice_score
+        metrics[6, start_ndx:end_ndx] = precision
+        metrics[7, start_ndx:end_ndx] = recall
+        metrics[8, start_ndx:end_ndx] = (loss * pos_mask.squeeze()).sum(dim=[1, 2, 3])
+        metrics[9, start_ndx:end_ndx] = (loss * neg_mask.squeeze()).sum(dim=[1, 2, 3])
+        metrics[10, start_ndx:end_ndx] = (true_pos + true_neg) / masks.size(-1) ** 3
+        metrics[11, start_ndx:end_ndx] = true_pos / pos_count
+        metrics[12, start_ndx:end_ndx] = true_neg / neg_count
 
         if need_imgs:
-            predicted1 = prediction[0, 0, :, :, self.args.image_size // 2]
-            predicted2 = prediction[0, 0, :, self.args.image_size // 2, :]
-            predicted3 = prediction[0, 0, self.args.image_size // 2, :, :]
-            ground_truth1 = masks[0, 0, :, :, self.args.image_size // 2]
-            ground_truth2 = masks[0, 0, :, self.args.image_size // 2, :]
-            ground_truth3 = masks[0, 0, self.args.image_size // 2, :, :]
-            return loss.mean(), [predicted1, predicted2, predicted3, ground_truth1, ground_truth2, ground_truth3]
+            slice1 = prediction[0, 1, :, :, self.args.image_size // 2].unsqueeze(0)
+            slice2 = prediction[0, 1, :, self.args.image_size // 2, :].unsqueeze(0)
+            slice3 = prediction[0, 1, self.args.image_size // 2, :, :].unsqueeze(0)
+            ground_truth1 = (masks[0, 0, :, :, self.args.image_size // 2] > 0).unsqueeze(0)
+            ground_truth2 = (masks[0, 0, :, self.args.image_size // 2, :] > 0).unsqueeze(0)
+            ground_truth3 = (masks[0, 0, self.args.image_size // 2, :, :] > 0).unsqueeze(0)
+            predicted1 = torch.concat([slice1, slice1, slice1 * ~ground_truth1], dim=0)
+            predicted2 = torch.concat([slice2, slice2, slice2 * ~ground_truth2], dim=0)
+            predicted3 = torch.concat([slice3, slice3, slice3 * ~ground_truth3], dim=0)
+            mask1 = torch.concat([ground_truth1, ground_truth1, ground_truth1], dim=0)
+            mask2 = torch.concat([ground_truth2, ground_truth2, ground_truth2], dim=0)
+            mask3 = torch.concat([ground_truth3, ground_truth3, ground_truth3], dim=0)
+            return loss.mean(), [predicted1, predicted2, predicted3, mask1, mask2, mask3]
         else:
             return loss.mean()
 
@@ -179,34 +223,45 @@ class SegmentationTrainingApp:
         epoch_ndx,
         mode_str,
         metrics,
-        img_list=None
+        img_list=None,
+        logging_index=True
     ):
         self.initTensorboardWriters()
-        if epoch_ndx < 10:
-            log.info("E{} {}".format(
-                epoch_ndx,
-                type(self).__name__,
-            ))
+        if logging_index:
+            log.info("E{} {}".format(epoch_ndx, type(self).__name__))
 
-        log.info(
-            "E{} {}:{} loss".format(
-                epoch_ndx,
-                mode_str,
-                metrics.mean()
-            )
-        )
+            log.info("E{} {}:{} loss".format(epoch_ndx, mode_str, metrics[0,:].mean()))
+
+        true_pos = metrics[1,:].sum()
+        true_neg = metrics[2,:].sum()
+        false_pos = metrics[3,:].sum()
+        false_neg = metrics[4,:].sum()
+        
+        epsilon = 1
+        dice_score = (2 * true_pos + epsilon) / (2 * true_pos +  false_pos + false_neg + epsilon)
+        precision = true_pos / (true_pos + false_pos)
+        recall = true_pos / (true_pos + false_neg)
+
+        metrics_dict = {}
+        metrics_dict['loss/all'] = metrics[0, :].mean()
+        metrics_dict['overall dice'] = dice_score
+        metrics_dict['overall precision'] = precision
+        metrics_dict['overall recall'] = recall
+        metrics_dict['average dice'] = metrics[5, :].mean()
+        metrics_dict['average precision'] = metrics[6, :].mean()
+        metrics_dict['average recall'] = metrics[7, :].mean()
+        metrics_dict['loss/pos'] = metrics[8, :].mean()
+        metrics_dict['loss/neg'] = metrics[9, :].mean()
+        metrics_dict['correct/all'] = metrics[10, :].mean()
+        metrics_dict['correct/pos'] = metrics[11, :].mean()
+        metrics_dict['correct/neg'] = metrics[12, :].mean()
 
         writer = getattr(self, mode_str + '_writer')
-        writer.add_scalar(
-            'loss_total',
-            scalar_value=metrics.mean(),
-            global_step=self.totalTrainingSamples_count
-        )
+        for key, value in metrics_dict.items():
+            writer.add_scalar(key, value, global_step=self.totalTrainingSamples_count)
 
         if img_list:
-            img_list = [img.unsqueeze(dim=0).unsqueeze(dim=0) for img in img_list]
-            imgs = torch.concat(img_list, dim=0)
-            grid = torchvision.utils.make_grid(imgs, nrow=3)
+            grid = torchvision.utils.make_grid(img_list, nrow=3)
             writer.add_image('images',
                 grid,
                 global_step=self.totalTrainingSamples_count,
@@ -243,7 +298,7 @@ class SegmentationTrainingApp:
 
         torch.save(state, file_path)
 
-        log.debug("Saved model params to {}".format(file_path))
+        # log.debug("Saved model params to {}".format(file_path))
 
         if isBest:
             best_path = os.path.join(
@@ -258,7 +313,7 @@ class SegmentationTrainingApp:
             )
             shutil.copyfile(file_path, best_path)
 
-            log.debug("Saved model params to {}".format(best_path))
+            # log.debug("Saved model params to {}".format(best_path))
 
 if __name__ == '__main__':
     SegmentationTrainingApp().main()

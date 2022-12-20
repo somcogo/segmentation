@@ -49,6 +49,9 @@ class SwinUNETR(nn.Module):
 			decoder = UNetUpBlock(in_size=in_size, out_size=out_size, scale_factor=scale_factor)
 			self.decoders.append(decoder)
 
+		self.head = nn.Conv3d(in_channels=embed_dim, out_channels=2, kernel_size=1)
+		self.activation = nn.Softmax(dim=1)
+
 	def forward(self, x):
 		hidden_features = self.swin_tr(x)
 		enc = []
@@ -65,4 +68,6 @@ class SwinUNETR(nn.Module):
 			else:
 				dec.append(self.decoders[-i - 1](dec[i - 1], enc[-i - 2]))
 
-		return dec[-1]
+		linear_out = self.head(dec[-1])
+		prob_out = self.activation(linear_out)
+		return linear_out, prob_out

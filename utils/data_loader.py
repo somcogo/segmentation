@@ -19,7 +19,7 @@ def getTupleListHDF5():
     raw_path_list_neu.sort()
     id_list_neu = [(os.path.split(path)[-1][:-5], 'neuesCT') for path in raw_path_list_neu]
     id_list = id_list_alt + id_list_neu
-    return id_list
+    return id_list_alt, id_list_neu
 
 @functools.lru_cache
 def getImagesHDF5(id, scanner, image_size):
@@ -60,10 +60,15 @@ class SegmentationDatasetHDF5(Dataset):
         return img.unsqueeze(0).to(dtype=torch.float), mask.unsqueeze(0).to(dtype=torch.float)
 
 def getDataLoaderHDF5(batch_size, image_size, num_workers, data_ratio=1.0, persistent_workers=False):
-    tuple_list = getTupleListHDF5()
-    end_ndx = int(len(tuple_list) * data_ratio)
-    tuple_list = tuple_list[:end_ndx]
-    train_list, val_list = train_test_split(tuple_list, test_size=0.1, shuffle=False)
+    tuple_list_alt, tuple_list_neu = getTupleListHDF5()
+    train_list_alt, val_list_alt = train_test_split(tuple_list_alt, test_size=0.1, shuffle=False)
+    train_list_neu, val_list_neu = train_test_split(tuple_list_neu, test_size=0.1, shuffle=False)
+    train_list = train_list_alt + train_list_neu
+    val_list = val_list_alt + val_list_neu
+    end_ndx_trn = int(len(train_list) * data_ratio)
+    train_list = train_list[:end_ndx_trn]
+    if not data_ratio == 1.0:
+        val_list = val_list[:batch_size]
     train_ds = SegmentationDatasetHDF5(train_list, image_size)
     val_ds = SegmentationDatasetHDF5(val_list, image_size)
     train_dl = DataLoader(train_ds, batch_size=batch_size, num_workers=num_workers, drop_last=True, persistent_workers=persistent_workers)
