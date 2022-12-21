@@ -26,3 +26,4 @@ lightning_logs
 dummy.py
 preprocessing.py
 server_runs
+work/
