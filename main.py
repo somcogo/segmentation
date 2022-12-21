@@ -6,37 +6,49 @@ import shutil
 
 import torch
 import torch.nn as nn
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from torch.utils.tensorboard import SummaryWriter
 import torchvision
 import numpy as np
+import monai
 
 from models.swinunetr import SwinUNETR
 from utils.logconf import logging
 from utils.data_loader import getDataLoaderHDF5
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "4, 6"
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
 log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
 class SegmentationTrainingApp:
-    def __init__(self, sys_argv=None):
+    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, data_ratio=None, comment=None):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
 
         parser = argparse.ArgumentParser(description="Test training")
         parser.add_argument("--epochs", default=10, type=int, help="number of training epochs")
-        parser.add_argument("--batch_size", default=16, type=int, help="number of batch size")
+        parser.add_argument("--batch_size", default=1, type=int, help="number of batch size")
         parser.add_argument("--logdir", default="test", type=str, help="directory to save the tensorboard logs")
         parser.add_argument("--in_channels", default=1, type=int, help="number of image channels")
         parser.add_argument("--lr", default=1e-3, type=float, help="learning rate")
         parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')
         parser.add_argument("--image_size", default=64, type=int, help="image size  used for learning")
-        parser.add_argument('--data_ratio', default=1.0, type=float, help="what ratio of data to use")
+        parser.add_argument('--data_ratio', default=1, type=float, help="what ratio of data to use")
 
         self.args = parser.parse_args()
+        if epochs:
+            self.args.epochs = epochs
+        if batch_size:
+            self.args.batch_size = batch_size
+        if logdir:
+            self.args.logdir = logdir
+        if lr:
+            self.args.lr = lr
+        if data_ratio:
+            self.args.data_ratio = data_ratio
+        if comment:
+            self.args.comment = comment
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
@@ -62,7 +74,8 @@ class SegmentationTrainingApp:
         return model
 
     def initOptimizer(self):
-        return Adam(params=self.model.parameters(), lr=self.args.lr)
+        # replaced Adam with SGD
+        return SGD(params=self.model.parameters(), lr=self.args.lr)
 
     def initDl(self):
         return getDataLoaderHDF5(batch_size=self.args.batch_size, image_size=self.args.image_size, num_workers=64, data_ratio=self.args.data_ratio, persistent_workers=True)
@@ -127,8 +140,8 @@ class SegmentationTrainingApp:
             loss.backward()
             self.optimizer.step()
 
-            if batch_ndx % 10 == 0 and epoch_ndx < 10:
-                log.info('E{} Training {}/{}'.format(epoch_ndx, batch_ndx, len(train_dl)))
+            # if batch_ndx % 10 == 0 and epoch_ndx < 10:
+            #     log.info('E{} Training {}/{}'.format(epoch_ndx, batch_ndx, len(train_dl)))
 
         self.totalTrainingSamples_count += len(train_dl.dataset)
 
@@ -162,8 +175,8 @@ class SegmentationTrainingApp:
         masks = masks.long()
         prediction, probabilities = self.model(batch)
 
-        loss_fn = nn.CrossEntropyLoss(reduction='none')
-        loss = loss_fn(prediction, masks.squeeze(dim=1))
+        # loss_fn = nn.CrossEntropyLoss(reduction='none')
+        # loss = loss_fn(prediction, masks.squeeze(dim=1))
 
         pred_label = torch.argmax(probabilities, dim=1, keepdim=True, out=None)
         pos_pred = pred_label > 0
@@ -184,10 +197,14 @@ class SegmentationTrainingApp:
         precision = (true_pos + false_pos != 0) * true_pos / (true_pos + false_pos)
         recall = true_pos / (true_pos + false_neg)
 
+        # Trying Dice score as loss function
+        loss = 1 - dice_score
+        loss.requires_grad = True
+
         start_ndx = batch_ndx * batch_size
         end_ndx = start_ndx + masks.size(0)
 
-        metrics[0, start_ndx:end_ndx] = loss.sum(dim=[1, 2, 3])
+        metrics[0, start_ndx:end_ndx] = loss
         metrics[1, start_ndx:end_ndx] = true_pos
         metrics[2, start_ndx:end_ndx] = true_neg
         metrics[3, start_ndx:end_ndx] = false_pos
@@ -195,8 +212,9 @@ class SegmentationTrainingApp:
         metrics[5, start_ndx:end_ndx] = dice_score
         metrics[6, start_ndx:end_ndx] = precision
         metrics[7, start_ndx:end_ndx] = recall
-        metrics[8, start_ndx:end_ndx] = (loss * pos_mask.squeeze()).sum(dim=[1, 2, 3])
-        metrics[9, start_ndx:end_ndx] = (loss * neg_mask.squeeze()).sum(dim=[1, 2, 3])
+        # metric_dict also commented out
+        # metrics[8, start_ndx:end_ndx] = (loss * pos_mask.squeeze()).sum(dim=[1, 2, 3])
+        # metrics[9, start_ndx:end_ndx] = (loss * neg_mask.squeeze()).sum(dim=[1, 2, 3])
         metrics[10, start_ndx:end_ndx] = (true_pos + true_neg) / masks.size(-1) ** 3
         metrics[11, start_ndx:end_ndx] = true_pos / pos_count
         metrics[12, start_ndx:end_ndx] = true_neg / neg_count
@@ -205,16 +223,22 @@ class SegmentationTrainingApp:
             slice1 = prediction[0, 1, :, :, self.args.image_size // 2].unsqueeze(0)
             slice2 = prediction[0, 1, :, self.args.image_size // 2, :].unsqueeze(0)
             slice3 = prediction[0, 1, self.args.image_size // 2, :, :].unsqueeze(0)
+            segmentation1 = pred_label[0, 0, :, :, self.args.image_size // 2].unsqueeze(0)
+            segmentation2 = pred_label[0, 0, :, self.args.image_size // 2, :].unsqueeze(0)
+            segmentation3 = pred_label[0, 0, self.args.image_size // 2, :, :].unsqueeze(0)
             ground_truth1 = (masks[0, 0, :, :, self.args.image_size // 2] > 0).unsqueeze(0)
             ground_truth2 = (masks[0, 0, :, self.args.image_size // 2, :] > 0).unsqueeze(0)
             ground_truth3 = (masks[0, 0, self.args.image_size // 2, :, :] > 0).unsqueeze(0)
-            predicted1 = torch.concat([slice1, slice1, slice1 * ~ground_truth1], dim=0)
-            predicted2 = torch.concat([slice2, slice2, slice2 * ~ground_truth2], dim=0)
-            predicted3 = torch.concat([slice3, slice3, slice3 * ~ground_truth3], dim=0)
+            predicted1 = torch.concat([segmentation1, segmentation1 * ~ground_truth1, segmentation1 * ~ground_truth1], dim=0)
+            predicted2 = torch.concat([segmentation2, segmentation2 * ~ground_truth2, segmentation2 * ~ground_truth2], dim=0)
+            predicted3 = torch.concat([segmentation3, segmentation3 * ~ground_truth3, segmentation3 * ~ground_truth3], dim=0)
+            seg1 = torch.concat([slice1, slice1 * ~ground_truth1, slice1 * ~ground_truth1], dim=0)
+            seg2 = torch.concat([slice2, slice2 * ~ground_truth2, slice2 * ~ground_truth2], dim=0)
+            seg3 = torch.concat([slice3, slice3 * ~ground_truth3, slice3 * ~ground_truth3], dim=0)
             mask1 = torch.concat([ground_truth1, ground_truth1, ground_truth1], dim=0)
             mask2 = torch.concat([ground_truth2, ground_truth2, ground_truth2], dim=0)
             mask3 = torch.concat([ground_truth3, ground_truth3, ground_truth3], dim=0)
-            return loss.mean(), [predicted1, predicted2, predicted3, mask1, mask2, mask3]
+            return loss.mean(), [predicted1, predicted2, predicted3, seg1, seg2, seg3, mask1, mask2, mask3]
         else:
             return loss.mean()
 
@@ -228,8 +252,6 @@ class SegmentationTrainingApp:
     ):
         self.initTensorboardWriters()
         if logging_index:
-            log.info("E{} {}".format(epoch_ndx, type(self).__name__))
-
             log.info("E{} {}:{} loss".format(epoch_ndx, mode_str, metrics[0,:].mean()))
 
         true_pos = metrics[1,:].sum()
@@ -250,8 +272,8 @@ class SegmentationTrainingApp:
         metrics_dict['average dice'] = metrics[5, :].mean()
         metrics_dict['average precision'] = metrics[6, :].mean()
         metrics_dict['average recall'] = metrics[7, :].mean()
-        metrics_dict['loss/pos'] = metrics[8, :].mean()
-        metrics_dict['loss/neg'] = metrics[9, :].mean()
+        # metrics_dict['loss/pos'] = metrics[8, :].mean()
+        # metrics_dict['loss/neg'] = metrics[9, :].mean()
         metrics_dict['correct/all'] = metrics[10, :].mean()
         metrics_dict['correct/pos'] = metrics[11, :].mean()
         metrics_dict['correct/neg'] = metrics[12, :].mean()
