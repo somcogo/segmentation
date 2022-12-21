@@ -15,14 +15,13 @@ from models.swinunetr import SwinUNETR
 from utils.logconf import logging
 from utils.data_loader import getDataLoaderHDF5
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "4, 6"
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
 log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
 class SegmentationTrainingApp:
-    def __init__(self, sys_argv=None):
+    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, data_ratio=None, comment=None, XEweight=None):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
 
@@ -35,14 +34,33 @@ class SegmentationTrainingApp:
         parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')
         parser.add_argument("--image_size", default=64, type=int, help="image size  used for learning")
         parser.add_argument('--data_ratio', default=1.0, type=float, help="what ratio of data to use")
+        parser.add_argument('--XEweight', default=None, type=float, help="weight of the second class in Cross Entropy Loss")
 
         self.args = parser.parse_args()
+        if epochs:
+            self.args.epochs = epochs
+        if batch_size:
+            self.args.batch_size = batch_size
+        if logdir:
+            self.args.logdir = logdir
+        if lr:
+            self.args.lr = lr
+        if data_ratio:
+            self.args.data_ratio = data_ratio
+        if comment:
+            self.args.comment = comment
+        if XEweight:
+            self.args.XEweight = XEweight
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
         self.logdir = os.path.join('./runs', self.args.logdir)
         os.makedirs(self.logdir, exist_ok=True)
-
+        if self.args.XEweight != None:
+            self.XEweight = torch.Tensor([1, self.args.XEweight])
+            self.XEweight = self.XEweight.to(device=self.device)
+        else:
+            self.XEweight = None
         self.trn_writer = None
         self.val_writer = None
         self.totalTrainingSamples_count = 0
@@ -51,7 +69,7 @@ class SegmentationTrainingApp:
         self.optimizer = self.initOptimizer()
 
     def initModel(self):
-        model = SwinUNETR(img_size=self.args.image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
+        model = SwinUNETR(img_size=self.args.image_size, patch_size=2, embed_dim=12, depths=[2, 2, 2], num_heads=[3, 6, 12])
         param_num = sum(p.numel() for p in model.parameters())
         log.info('Initiated model with {} params'.format(param_num))
         if self.use_cuda:
@@ -112,7 +130,7 @@ class SegmentationTrainingApp:
         self.model.train()
         trnMetrics = torch.zeros(13, len(train_dl.dataset), device=self.device)
 
-        if epoch_ndx < 10:
+        if epoch_ndx < 5:
             log.warning('E{} Training ---/{} starting'.format(epoch_ndx, len(train_dl)))
 
         for batch_ndx, batch_tuple in enumerate(train_dl):
@@ -127,7 +145,7 @@ class SegmentationTrainingApp:
             loss.backward()
             self.optimizer.step()
 
-            if batch_ndx % 10 == 0 and epoch_ndx < 10:
+            if batch_ndx % 20 == 0 and epoch_ndx < 10:
                 log.info('E{} Training {}/{}'.format(epoch_ndx, batch_ndx, len(train_dl)))
 
         self.totalTrainingSamples_count += len(train_dl.dataset)
@@ -162,7 +180,7 @@ class SegmentationTrainingApp:
         masks = masks.long()
         prediction, probabilities = self.model(batch)
 
-        loss_fn = nn.CrossEntropyLoss(reduction='none')
+        loss_fn = nn.CrossEntropyLoss(weight=self.XEweight, reduction='none')
         loss = loss_fn(prediction, masks.squeeze(dim=1))
 
         pred_label = torch.argmax(probabilities, dim=1, keepdim=True, out=None)
@@ -205,16 +223,22 @@ class SegmentationTrainingApp:
             slice1 = prediction[0, 1, :, :, self.args.image_size // 2].unsqueeze(0)
             slice2 = prediction[0, 1, :, self.args.image_size // 2, :].unsqueeze(0)
             slice3 = prediction[0, 1, self.args.image_size // 2, :, :].unsqueeze(0)
+            segmentation1 = pred_label[0, 0, :, :, self.args.image_size // 2].unsqueeze(0)
+            segmentation2 = pred_label[0, 0, :, self.args.image_size // 2, :].unsqueeze(0)
+            segmentation3 = pred_label[0, 0, self.args.image_size // 2, :, :].unsqueeze(0)
             ground_truth1 = (masks[0, 0, :, :, self.args.image_size // 2] > 0).unsqueeze(0)
             ground_truth2 = (masks[0, 0, :, self.args.image_size // 2, :] > 0).unsqueeze(0)
             ground_truth3 = (masks[0, 0, self.args.image_size // 2, :, :] > 0).unsqueeze(0)
-            predicted1 = torch.concat([slice1, slice1, slice1 * ~ground_truth1], dim=0)
-            predicted2 = torch.concat([slice2, slice2, slice2 * ~ground_truth2], dim=0)
-            predicted3 = torch.concat([slice3, slice3, slice3 * ~ground_truth3], dim=0)
+            predicted1 = torch.concat([segmentation1, segmentation1 * ~ground_truth1, segmentation1 * ~ground_truth1], dim=0)
+            predicted2 = torch.concat([segmentation2, segmentation2 * ~ground_truth2, segmentation2 * ~ground_truth2], dim=0)
+            predicted3 = torch.concat([segmentation3, segmentation3 * ~ground_truth3, segmentation3 * ~ground_truth3], dim=0)
+            seg1 = torch.concat([slice1, slice1 * ~ground_truth1, slice1 * ~ground_truth1], dim=0)
+            seg2 = torch.concat([slice2, slice2 * ~ground_truth2, slice2 * ~ground_truth2], dim=0)
+            seg3 = torch.concat([slice3, slice3 * ~ground_truth3, slice3 * ~ground_truth3], dim=0)
             mask1 = torch.concat([ground_truth1, ground_truth1, ground_truth1], dim=0)
             mask2 = torch.concat([ground_truth2, ground_truth2, ground_truth2], dim=0)
             mask3 = torch.concat([ground_truth3, ground_truth3, ground_truth3], dim=0)
-            return loss.mean(), [predicted1, predicted2, predicted3, mask1, mask2, mask3]
+            return loss.mean(), [predicted1, predicted2, predicted3, seg1, seg2, seg3, mask1, mask2, mask3]
         else:
             return loss.mean()
 

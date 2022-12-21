@@ -6,7 +6,7 @@ utils/__pycache__/
 lightning_logs
 .gitignore
 dummy.py
-
+__pycache__/
 saved_models/
 test-trn-dwlpt/
 test-val-dwlpt/
