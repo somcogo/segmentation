@@ -11,6 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torchvision
 import numpy as np
 import monai
+from monai.metrics.hausdorff_distance import compute_hausdorff_distance
 
 from models.swinunetr import SwinUNETR
 from utils.logconf import logging
@@ -72,7 +73,7 @@ class SegmentationTrainingApp:
         self.optimizer = self.initOptimizer()
 
     def initModel(self):
-        model = SwinUNETR(img_size=self.args.image_size, patch_size=2, embed_dim=12, depths=[2, 2, 2], num_heads=[3, 6, 12])
+        model = SwinUNETR(img_size=self.args.image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
         param_num = sum(p.numel() for p in model.parameters())
         log.info('Initiated model with {} params'.format(param_num))
         if self.use_cuda:
@@ -83,8 +84,7 @@ class SegmentationTrainingApp:
         return model
 
     def initOptimizer(self):
-        # replaced Adam with SGD
-        return SGD(params=self.model.parameters(), lr=self.args.lr)
+        return Adam(params=self.model.parameters(), lr=self.args.lr)
 
     def initDl(self):
         return getDataLoaderHDF5(batch_size=self.args.batch_size, image_size=self.args.image_size, num_workers=64, data_ratio=self.args.data_ratio, persistent_workers=True)
@@ -132,7 +132,7 @@ class SegmentationTrainingApp:
 
     def doTraining(self, epoch_ndx, train_dl):
         self.model.train()
-        trnMetrics = torch.zeros(13, len(train_dl.dataset), device=self.device)
+        trnMetrics = torch.zeros(14, len(train_dl.dataset), device=self.device)
 
         if epoch_ndx < 5:
             log.warning('E{} Training ---/{} starting'.format(epoch_ndx, len(train_dl)))
@@ -159,7 +159,7 @@ class SegmentationTrainingApp:
     def doValidation(self, epoch_ndx, val_dl):
         with torch.no_grad():
             self.model.eval()
-            valMetrics = torch.zeros(13, len(val_dl.dataset), device=self.device)
+            valMetrics = torch.zeros(14, len(val_dl.dataset), device=self.device)
 
             if epoch_ndx < 10:
                 log.warning('E{} Validation ---/{} starting'.format(epoch_ndx, len(val_dl)))
@@ -201,9 +201,12 @@ class SegmentationTrainingApp:
         false_neg = pos_count - true_pos
 
         dice_score = (2 * true_pos ) / (2 * true_pos + false_pos + false_neg)
-        precision = torch.zeros(masks.size(0))
-        precision = (true_pos + false_pos != 0) * true_pos / (true_pos + false_pos)
+        precision = torch.zeros(true_pos.shape).to(device=self.device)
+        division_mask = true_pos + false_pos > 0
+        precision[division_mask] = (true_pos[division_mask] / (true_pos[division_mask] + false_pos[division_mask]))
+        assert not ( True in torch.isnan(precision))
         recall = true_pos / (true_pos + false_neg)
+        hd_dist = compute_hausdorff_distance(y_pred=pred_label, y=masks, percentile=95, include_background=False)
 
         if self.args.loss_fn == 'dice':
             # Trying Dice score as loss function
@@ -233,6 +236,7 @@ class SegmentationTrainingApp:
         metrics[10, start_ndx:end_ndx] = (true_pos + true_neg) / masks.size(-1) ** 3
         metrics[11, start_ndx:end_ndx] = true_pos / pos_count
         metrics[12, start_ndx:end_ndx] = true_neg / neg_count
+        metrics[13, start_ndx:end_ndx] = hd_dist
 
         if need_imgs:
             slice1 = prediction[0, 1, :, :, self.args.image_size // 2].unsqueeze(0)
@@ -292,6 +296,7 @@ class SegmentationTrainingApp:
         metrics_dict['correct/all'] = metrics[10, :].mean()
         metrics_dict['correct/pos'] = metrics[11, :].mean()
         metrics_dict['correct/neg'] = metrics[12, :].mean()
+        metrics_dict['Hausdorff distance'] = metrics[13, :]
 
         writer = getattr(self, mode_str + '_writer')
         for key, value in metrics_dict.items():
