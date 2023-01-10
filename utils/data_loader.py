@@ -69,6 +69,13 @@ def getDataLoaderHDF5(batch_size, image_size, num_workers, data_ratio=1.0, persi
     train_list = train_list[:end_ndx_trn]
     if not data_ratio == 1.0:
         val_list = val_list[:batch_size]
+    # for overfitting
+    # train_list2 = []
+    # val_list2 = []
+    # for i in range(len(train_list)):
+    #     train_list2.append(tuple_list_alt[0])
+    # for i in range(len(val_list)):
+    #     val_list2.append(tuple_list_alt[0])
     train_ds = SegmentationDatasetHDF5(train_list, image_size)
     val_ds = SegmentationDatasetHDF5(val_list, image_size)
     train_dl = DataLoader(train_ds, batch_size=batch_size, num_workers=num_workers, drop_last=True, persistent_workers=persistent_workers)

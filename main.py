@@ -197,7 +197,7 @@ class SegmentationTrainingApp:
         false_pos = neg_count - true_neg
         false_neg = pos_count - true_pos
 
-        dice_score = (2 * true_pos ) / (pos_count + neg_count)
+        dice_score = (2 * true_pos ) / (2 * true_pos + false_pos + false_neg)
         precision = torch.zeros(masks.size(0))
         precision = (true_pos + false_pos != 0) * true_pos / (true_pos + false_pos)
         recall = true_pos / (true_pos + false_neg)
