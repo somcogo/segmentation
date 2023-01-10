@@ -22,13 +22,13 @@ log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
 class SegmentationTrainingApp:
-    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, data_ratio=None, comment=None, XEweight=None):
+    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, data_ratio=None, comment=None, XEweight=None, loss_fn='XE'):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
 
         parser = argparse.ArgumentParser(description="Test training")
         parser.add_argument("--epochs", default=10, type=int, help="number of training epochs")
-        parser.add_argument("--batch_size", default=1, type=int, help="number of batch size")
+        parser.add_argument("--batch_size", default=16, type=int, help="number of batch size")
         parser.add_argument("--logdir", default="test", type=str, help="directory to save the tensorboard logs")
         parser.add_argument("--in_channels", default=1, type=int, help="number of image channels")
         parser.add_argument("--lr", default=1e-3, type=float, help="learning rate")
@@ -52,6 +52,8 @@ class SegmentationTrainingApp:
             self.args.comment = comment
         if XEweight:
             self.args.XEweight = XEweight
+        if loss_fn:
+            self.args.loss_fn = loss_fn
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
@@ -182,8 +184,7 @@ class SegmentationTrainingApp:
         masks = masks.long()
         prediction, probabilities = self.model(batch)
 
-        loss_fn = nn.CrossEntropyLoss(weight=self.XEweight, reduction='none')
-        loss = loss_fn(prediction, masks.squeeze(dim=1))
+
 
         pred_label = torch.argmax(probabilities, dim=1, keepdim=True, out=None)
         pos_pred = pred_label > 0
@@ -199,19 +200,29 @@ class SegmentationTrainingApp:
         false_pos = neg_count - true_neg
         false_neg = pos_count - true_pos
 
-        dice_score = (2 * true_pos ) / (pos_count + neg_count)
+        dice_score = (2 * true_pos ) / (2 * true_pos + false_pos + false_neg)
         precision = torch.zeros(masks.size(0))
         precision = (true_pos + false_pos != 0) * true_pos / (true_pos + false_pos)
         recall = true_pos / (true_pos + false_neg)
 
-        # Trying Dice score as loss function
-        loss = 1 - dice_score
-        loss.requires_grad = True
+        if self.args.loss_fn == 'dice':
+            # Trying Dice score as loss function
+            loss = 1 - dice_score
+            loss.requires_grad = True
+        else:
+            loss_fn = nn.CrossEntropyLoss(weight=self.XEweight, reduction='none')
+            loss = loss_fn(prediction, masks.squeeze(dim=1))
 
         start_ndx = batch_ndx * batch_size
         end_ndx = start_ndx + masks.size(0)
 
-        metrics[0, start_ndx:end_ndx] = loss
+        if self.args.loss_fn == 'dice':
+            metrics[0, start_ndx:end_ndx] = loss
+        else:
+            metrics[0, start_ndx:end_ndx] = loss.sum(dim=[1, 2, 3])
+            metrics[8, start_ndx:end_ndx] = (loss * pos_mask.squeeze()).sum(dim=[1, 2, 3])
+            metrics[9, start_ndx:end_ndx] = (loss * neg_mask.squeeze()).sum(dim=[1, 2, 3])
+
         metrics[1, start_ndx:end_ndx] = true_pos
         metrics[2, start_ndx:end_ndx] = true_neg
         metrics[3, start_ndx:end_ndx] = false_pos
@@ -219,9 +230,6 @@ class SegmentationTrainingApp:
         metrics[5, start_ndx:end_ndx] = dice_score
         metrics[6, start_ndx:end_ndx] = precision
         metrics[7, start_ndx:end_ndx] = recall
-        # metric_dict also commented out
-        # metrics[8, start_ndx:end_ndx] = (loss * pos_mask.squeeze()).sum(dim=[1, 2, 3])
-        # metrics[9, start_ndx:end_ndx] = (loss * neg_mask.squeeze()).sum(dim=[1, 2, 3])
         metrics[10, start_ndx:end_ndx] = (true_pos + true_neg) / masks.size(-1) ** 3
         metrics[11, start_ndx:end_ndx] = true_pos / pos_count
         metrics[12, start_ndx:end_ndx] = true_neg / neg_count
@@ -233,28 +241,18 @@ class SegmentationTrainingApp:
             segmentation1 = pred_label[0, 0, :, :, self.args.image_size // 2].unsqueeze(0)
             segmentation2 = pred_label[0, 0, :, self.args.image_size // 2, :].unsqueeze(0)
             segmentation3 = pred_label[0, 0, self.args.image_size // 2, :, :].unsqueeze(0)
-            segmentation1 = pred_label[0, 0, :, :, self.args.image_size // 2].unsqueeze(0)
-            segmentation2 = pred_label[0, 0, :, self.args.image_size // 2, :].unsqueeze(0)
-            segmentation3 = pred_label[0, 0, self.args.image_size // 2, :, :].unsqueeze(0)
             ground_truth1 = (masks[0, 0, :, :, self.args.image_size // 2] > 0).unsqueeze(0)
             ground_truth2 = (masks[0, 0, :, self.args.image_size // 2, :] > 0).unsqueeze(0)
             ground_truth3 = (masks[0, 0, self.args.image_size // 2, :, :] > 0).unsqueeze(0)
-            predicted1 = torch.concat([segmentation1, segmentation1 * ~ground_truth1, segmentation1 * ~ground_truth1], dim=0)
-            predicted2 = torch.concat([segmentation2, segmentation2 * ~ground_truth2, segmentation2 * ~ground_truth2], dim=0)
-            predicted3 = torch.concat([segmentation3, segmentation3 * ~ground_truth3, segmentation3 * ~ground_truth3], dim=0)
-            seg1 = torch.concat([slice1, slice1 * ~ground_truth1, slice1 * ~ground_truth1], dim=0)
-            seg2 = torch.concat([slice2, slice2 * ~ground_truth2, slice2 * ~ground_truth2], dim=0)
-            seg3 = torch.concat([slice3, slice3 * ~ground_truth3, slice3 * ~ground_truth3], dim=0)
-            predicted1 = torch.concat([segmentation1, segmentation1 * ~ground_truth1, segmentation1 * ~ground_truth1], dim=0)
-            predicted2 = torch.concat([segmentation2, segmentation2 * ~ground_truth2, segmentation2 * ~ground_truth2], dim=0)
-            predicted3 = torch.concat([segmentation3, segmentation3 * ~ground_truth3, segmentation3 * ~ground_truth3], dim=0)
+            predicted1 = torch.concat([segmentation1, ground_truth1, ground_truth1], dim=0)
+            predicted2 = torch.concat([segmentation2, ground_truth2, ground_truth2], dim=0)
+            predicted3 = torch.concat([segmentation3, ground_truth3, ground_truth3], dim=0)
             seg1 = torch.concat([slice1, slice1 * ~ground_truth1, slice1 * ~ground_truth1], dim=0)
             seg2 = torch.concat([slice2, slice2 * ~ground_truth2, slice2 * ~ground_truth2], dim=0)
             seg3 = torch.concat([slice3, slice3 * ~ground_truth3, slice3 * ~ground_truth3], dim=0)
             mask1 = torch.concat([ground_truth1, ground_truth1, ground_truth1], dim=0)
             mask2 = torch.concat([ground_truth2, ground_truth2, ground_truth2], dim=0)
             mask3 = torch.concat([ground_truth3, ground_truth3, ground_truth3], dim=0)
-            return loss.mean(), [predicted1, predicted2, predicted3, seg1, seg2, seg3, mask1, mask2, mask3]
             return loss.mean(), [predicted1, predicted2, predicted3, seg1, seg2, seg3, mask1, mask2, mask3]
         else:
             return loss.mean()
@@ -289,8 +287,8 @@ class SegmentationTrainingApp:
         metrics_dict['average dice'] = metrics[5, :].mean()
         metrics_dict['average precision'] = metrics[6, :].mean()
         metrics_dict['average recall'] = metrics[7, :].mean()
-        # metrics_dict['loss/pos'] = metrics[8, :].mean()
-        # metrics_dict['loss/neg'] = metrics[9, :].mean()
+        metrics_dict['loss/pos'] = metrics[8, :].mean()
+        metrics_dict['loss/neg'] = metrics[9, :].mean()
         metrics_dict['correct/all'] = metrics[10, :].mean()
         metrics_dict['correct/pos'] = metrics[11, :].mean()
         metrics_dict['correct/neg'] = metrics[12, :].mean()
