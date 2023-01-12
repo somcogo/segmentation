@@ -78,8 +78,8 @@ def getDataLoaderHDF5(batch_size, image_size, num_workers, data_ratio=1.0, persi
     #     val_list2.append(tuple_list_alt[0])
     train_ds = SegmentationDatasetHDF5(train_list, image_size)
     val_ds = SegmentationDatasetHDF5(val_list, image_size)
-    train_dl = DataLoader(train_ds, batch_size=batch_size, num_workers=num_workers, drop_last=True, persistent_workers=persistent_workers)
-    val_dl = DataLoader(val_ds, batch_size=batch_size, num_workers=num_workers, drop_last=True, persistent_workers=persistent_workers, shuffle=False)
+    train_dl = DataLoader(train_ds, batch_size=batch_size, num_workers=num_workers, drop_last=False, persistent_workers=persistent_workers)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, num_workers=num_workers, drop_last=False, persistent_workers=persistent_workers, shuffle=False)
     return train_dl, val_dl
 
 def getTupleList():
