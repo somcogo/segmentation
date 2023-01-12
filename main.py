@@ -12,6 +12,7 @@ import torchvision
 import numpy as np
 import monai
 from monai.metrics.hausdorff_distance import compute_hausdorff_distance
+from monai.metrics.generalized_dice import compute_generalized_dice, GeneralizedDiceScore
 
 from models.swinunetr import SwinUNETR
 from utils.logconf import logging
