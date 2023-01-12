@@ -12,6 +12,7 @@ import torchvision
 import numpy as np
 import monai
 from monai.metrics.hausdorff_distance import compute_hausdorff_distance
+from monai.metrics.generalized_dice import compute_generalized_dice, GeneralizedDiceScore
 
 from models.swinunetr import SwinUNETR
 from utils.logconf import logging
@@ -236,7 +237,7 @@ class SegmentationTrainingApp:
         metrics[10, start_ndx:end_ndx] = (true_pos + true_neg) / masks.size(-1) ** 3
         metrics[11, start_ndx:end_ndx] = true_pos / pos_count
         metrics[12, start_ndx:end_ndx] = true_neg / neg_count
-        metrics[13, start_ndx:end_ndx] = hd_dist
+        metrics[13, start_ndx:end_ndx] = hd_dist.squeeze()
 
         if need_imgs:
             slice1 = prediction[0, 1, :, :, self.args.image_size // 2].unsqueeze(0)
@@ -296,7 +297,7 @@ class SegmentationTrainingApp:
         metrics_dict['correct/all'] = metrics[10, :].mean()
         metrics_dict['correct/pos'] = metrics[11, :].mean()
         metrics_dict['correct/neg'] = metrics[12, :].mean()
-        metrics_dict['Hausdorff distance'] = metrics[13, :]
+        metrics_dict['Hausdorff distance'] = metrics[13, :].mean()
 
         writer = getattr(self, mode_str + '_writer')
         for key, value in metrics_dict.items():
