@@ -74,7 +74,7 @@ class SegmentationTrainingApp:
         self.optimizer = self.initOptimizer()
 
     def initModel(self):
-        model = SwinUNETR(img_size=self.args.image_size, patch_size=2, embed_dim=12, depths=[2, 2, 2], num_heads=[3, 6, 12])
+        model = SwinUNETR(img_size=self.args.image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
         param_num = sum(p.numel() for p in model.parameters())
         log.info('Initiated model with {} params'.format(param_num))
         if self.use_cuda:
@@ -88,7 +88,7 @@ class SegmentationTrainingApp:
         return Adam(params=self.model.parameters(), lr=self.args.lr)
 
     def initDl(self):
-        return getDataLoaderHDF5(batch_size=self.args.batch_size, image_size=self.args.image_size, num_workers=64, data_ratio=self.args.data_ratio, persistent_workers=True)
+        return getDataLoaderHDF5(batch_size=self.args.batch_size, image_size=self.args.image_size, num_workers=48, data_ratio=self.args.data_ratio, persistent_workers=True)
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
