@@ -12,6 +12,9 @@ class SwinUNETR(nn.Module):
 		window_size=2,
 		depths=[2, 2, 2, 2],
 		num_heads=[3, 6, 12, 24],
+		ape=False,
+		drop_rate=0,
+		attn_drop_rate=0
 	):
 		super().__init__()
 
@@ -23,7 +26,10 @@ class SwinUNETR(nn.Module):
 			embed_dim=embed_dim,
 			window_size=window_size,
 			depths=depths,
-			num_heads=num_heads
+			num_heads=num_heads,
+			ape=ape,
+			drop_rate=drop_rate,
+			attn_drop_rate=attn_drop_rate
 		)
 		self.encoders = nn.ModuleList()
 		for i in range(len(depths) + 2):

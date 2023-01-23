@@ -110,6 +110,10 @@ class WindowAttention(nn.Module):
                 num_heads,
             )
         )
+        # self.relative_position_bias_table = torch.zeros(
+        #         (2 * self.window_size[0] - 1) * (2 * self.window_size[1] - 1) * (2 * self.window_size[2] - 1),
+        #         num_heads,
+        #     ).to(device='cuda:0')
         coords_d = torch.arange(self.window_size[0])
         coords_h = torch.arange(self.window_size[1])
         coords_w = torch.arange(self.window_size[2])
