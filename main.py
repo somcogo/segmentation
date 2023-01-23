@@ -6,7 +6,8 @@ import shutil
 
 import torch
 import torch.nn as nn
-from torch.optim import Adam, SGD
+from torch.optim import Adam, SGD, AdamW
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.tensorboard import SummaryWriter
 import torchvision
 import numpy as np
@@ -15,8 +16,10 @@ from monai.metrics.hausdorff_distance import compute_hausdorff_distance
 from monai.metrics.generalized_dice import compute_generalized_dice, GeneralizedDiceScore
 
 from models.swinunetr import SwinUNETR
+from models.unet import UNet
+from models.resnet50 import ResNet, ResBottleneckBlock
 from utils.logconf import logging
-from utils.data_loader import getDataLoaderHDF5
+from utils.data_loader import getDataLoaderHDF5, getDataLoaderForOverfitting
 
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
@@ -24,7 +27,7 @@ log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
 class SegmentationTrainingApp:
-    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, data_ratio=None, comment=None, XEweight=None, loss_fn='XE'):
+    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, data_ratio=None, comment=None, XEweight=None, loss_fn='XE', overfitting=False, model_type='swinunetr', optimizer_type='adam', weight_decay=0, betas=(0.9, 0.999), abs_pos_emb=False, scheduler_type=None, swin_type=1, aug=False, drop_rate=0, attn_drop_rate=0):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
 
@@ -56,6 +59,17 @@ class SegmentationTrainingApp:
             self.args.XEweight = XEweight
         if loss_fn:
             self.args.loss_fn = loss_fn
+        self.model_type = model_type
+        self.optimizer_type = optimizer_type
+        self.betas = betas
+        self.weight_decay = weight_decay
+        self.ape = abs_pos_emb
+        self.scheduler_type = scheduler_type
+        self.swin_type = swin_type
+        self.aug = aug
+        self.drop_rate = drop_rate
+        self.attn_drop_rate = attn_drop_rate
+        self.overfitting = overfitting
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
@@ -72,9 +86,38 @@ class SegmentationTrainingApp:
 
         self.model = self.initModel()
         self.optimizer = self.initOptimizer()
+        self.scheduler = self.initScheduler()
 
     def initModel(self):
-        model = SwinUNETR(img_size=self.args.image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
+        if self.model_type == 'swinunetr':
+            if self.swin_type == 1:
+                model = SwinUNETR(patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6], ape=self.ape)
+            elif self.swin_type == 2:
+                model = SwinUNETR(patch_size=8, embed_dim=6, depths=[2, 2, 2], num_heads=[3, 6, 12], ape=self.ape, drop_rate=self.drop_rate, attn_drop_rate=self.attn_drop_rate)
+            elif self.swin_type == '2.2':
+                model = SwinUNETR(patch_size=8, embed_dim=12, depths=[2, 2, 2], num_heads=[3, 6, 12], ape=self.ape, drop_rate=self.drop_rate, attn_drop_rate=self.attn_drop_rate)
+            elif self.swin_type == 3:
+                model = SwinUNETR(patch_size=4, embed_dim=3, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24], drop_rate=self.drop_rate, attn_drop_rate=self.attn_drop_rate)
+            elif self.swin_type == 4:
+                model = SwinUNETR(window_size=4, patch_size=4, embed_dim=6, depths=[2, 2, 2], num_heads=[3, 6, 12], ape=self.ape)
+            elif self.swin_type == 5:
+                model = SwinUNETR(patch_size=8, embed_dim=6, depths=[2, 2, 8], num_heads=[3, 6, 12], ape=self.ape, drop_rate=self.drop_rate, attn_drop_rate=self.attn_drop_rate)
+            elif self.swin_type == 'd2s':
+                model = SwinUNETR(patch_size=8, window_size=8, embed_dim=12, depths=[2, 2], num_heads=[3, 6], ape=self.ape, drop_rate=self.drop_rate, attn_drop_rate=self.attn_drop_rate)
+            elif self.swin_type == 'd2l':
+                model = SwinUNETR(patch_size=8, window_size=8, embed_dim=24, depths=[2, 2], num_heads=[3, 6], ape=self.ape, drop_rate=self.drop_rate, attn_drop_rate=self.attn_drop_rate)
+            elif self.swin_type == 'd3s':
+                model = SwinUNETR(patch_size=4, window_size=4, embed_dim=6, depths=[2, 2, 2], num_heads=[3, 6, 12], ape=self.ape, drop_rate=self.drop_rate, attn_drop_rate=self.attn_drop_rate)
+            elif self.swin_type == 'd3l':
+                model = SwinUNETR(patch_size=4, window_size=4, embed_dim=12, depths=[2, 2, 2], num_heads=[3, 6, 12], ape=self.ape, drop_rate=self.drop_rate, attn_drop_rate=self.attn_drop_rate)
+            elif self.swin_type == 'd4s':
+                model = SwinUNETR(patch_size=2, window_size=8, embed_dim=3, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24], ape=self.ape, drop_rate=self.drop_rate, attn_drop_rate=self.attn_drop_rate)
+            elif self.swin_type == 'd4l':
+                model = SwinUNETR(patch_size=2, window_size=8, embed_dim=6, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24], ape=self.ape, drop_rate=self.drop_rate, attn_drop_rate=self.attn_drop_rate)
+        elif self.model_type == 'unet':
+            model = UNet(in_channels=1, n_classes=2, depth=3, wf=4, padding=True, batch_norm=True, up_mode='upsample')
+        elif self.model_type == 'resnet':
+            model = ResNet(3, ResBottleneckBlock, [3, 4, 6, 3], useBottleneck=True, outputs=2)
         param_num = sum(p.numel() for p in model.parameters())
         log.info('Initiated model with {} params'.format(param_num))
         if self.use_cuda:
@@ -85,10 +128,22 @@ class SegmentationTrainingApp:
         return model
 
     def initOptimizer(self):
-        return Adam(params=self.model.parameters(), lr=self.args.lr)
+        if self.optimizer_type == 'adam':
+            return Adam(params=self.model.parameters(), lr=self.args.lr, betas=self.betas)
+        elif self.optimizer_type == 'adamw':
+            return AdamW(params=self.model.parameters(), lr=self.args.lr, betas=self.betas, weight_decay=self.weight_decay)
+
+    def initScheduler(self):
+        if self.scheduler_type == 'cosinewarmre':
+            return CosineAnnealingWarmRestarts(self.optimizer, 5000)
+        else:
+            return None
 
     def initDl(self):
-        return getDataLoaderHDF5(batch_size=self.args.batch_size, image_size=self.args.image_size, num_workers=64, data_ratio=self.args.data_ratio, persistent_workers=True)
+        if self.overfitting:
+            return getDataLoaderForOverfitting(batch_size=10, image_size=self.args.image_size, num_workers=64, persistent_workers=True, aug=self.aug)
+        else:
+            return getDataLoaderHDF5(batch_size=self.args.batch_size, image_size=self.args.image_size, num_workers=64, data_ratio=self.args.data_ratio, persistent_workers=True, aug=self.aug)
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
@@ -126,6 +181,10 @@ class SegmentationTrainingApp:
                 val_best = min(val_loss, val_best)
 
                 self.saveModel('segmentation', epoch_ndx, val_loss == val_best)
+            
+            if self.scheduler is not None:
+                self.scheduler.step()
+                # log.debug(self.scheduler.get_last_lr())
 
         if hasattr(self, 'trn_writer'):
             self.trn_writer.close()
@@ -185,8 +244,6 @@ class SegmentationTrainingApp:
         masks = masks.long()
         prediction, probabilities = self.model(batch)
 
-
-
         pred_label = torch.argmax(probabilities, dim=1, keepdim=True, out=None)
         pos_pred = pred_label > 0
         neg_pred = ~pos_pred
@@ -205,9 +262,11 @@ class SegmentationTrainingApp:
         precision = torch.zeros(true_pos.shape).to(device=self.device)
         division_mask = true_pos + false_pos > 0
         precision[division_mask] = (true_pos[division_mask] / (true_pos[division_mask] + false_pos[division_mask]))
-        assert not ( True in torch.isnan(precision))
         recall = true_pos / (true_pos + false_neg)
         hd_dist = compute_hausdorff_distance(y_pred=pred_label, y=masks, percentile=95, include_background=False)
+        NaN_mask = hd_dist.isnan()
+        hd_dist[NaN_mask] = 64
+        assert not torch.isnan(hd_dist).any()
 
         if self.args.loss_fn == 'dice':
             # Trying Dice score as loss function
@@ -249,15 +308,21 @@ class SegmentationTrainingApp:
             ground_truth1 = (masks[0, 0, :, :, self.args.image_size // 2] > 0).unsqueeze(0)
             ground_truth2 = (masks[0, 0, :, self.args.image_size // 2, :] > 0).unsqueeze(0)
             ground_truth3 = (masks[0, 0, self.args.image_size // 2, :, :] > 0).unsqueeze(0)
-            predicted1 = torch.concat([segmentation1, ground_truth1, ground_truth1], dim=0)
-            predicted2 = torch.concat([segmentation2, ground_truth2, ground_truth2], dim=0)
-            predicted3 = torch.concat([segmentation3, ground_truth3, ground_truth3], dim=0)
+            image1 = batch[0, 0, :, :, self.args.image_size // 2].unsqueeze(0)
+            image2 = batch[0, 0, :, self.args.image_size // 2, :].unsqueeze(0)
+            image3 = batch[0, 0, self.args.image_size // 2, :, :].unsqueeze(0)
+            predicted1 = torch.concat([ground_truth1, segmentation1, segmentation1], dim=0)
+            predicted2 = torch.concat([ground_truth2, segmentation2, segmentation2], dim=0)
+            predicted3 = torch.concat([ground_truth3, segmentation3, segmentation3], dim=0)
             seg1 = torch.concat([slice1, slice1 * ~ground_truth1, slice1 * ~ground_truth1], dim=0)
             seg2 = torch.concat([slice2, slice2 * ~ground_truth2, slice2 * ~ground_truth2], dim=0)
             seg3 = torch.concat([slice3, slice3 * ~ground_truth3, slice3 * ~ground_truth3], dim=0)
             mask1 = torch.concat([ground_truth1, ground_truth1, ground_truth1], dim=0)
             mask2 = torch.concat([ground_truth2, ground_truth2, ground_truth2], dim=0)
             mask3 = torch.concat([ground_truth3, ground_truth3, ground_truth3], dim=0)
+            ct1 = torch.concat([image1, image1, image1], dim=0)
+            ct2 = torch.concat([image2, image2, image2], dim=0)
+            ct3 = torch.concat([image3, image3, image3], dim=0)
             return loss.mean(), [predicted1, predicted2, predicted3, seg1, seg2, seg3, mask1, mask2, mask3]
         else:
             return loss.mean()

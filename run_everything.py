@@ -1,34 +1,34 @@
 from main import SegmentationTrainingApp
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "5, 6, 7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 
-exp1 = SegmentationTrainingApp(epochs=100, logdir='XE', lr=1e-2, comment='w2l2HD', loss_fn='XE', XEweight=2)
+exp1 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w4lr3Wt2drAUG', loss_fn='XE', XEweight=4, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True)
 exp1.main()
 
-exp2 = SegmentationTrainingApp(epochs=100, logdir='XE', comment='w2lr3HD', loss_fn='XE', XEweight=2)
-exp2.main()
+# exp2 = SegmentationTrainingApp(epochs=2500, logdir='type2', lr=1e-2, comment='w4lr2Wt2drAUG', loss_fn='XE', XEweight=4, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True)
+# exp2.main()
 
-exp3 = SegmentationTrainingApp(epochs=100, logdir='XE', lr=1e-4, comment='w2lr4HD', loss_fn='XE', XEweight=2)
+exp3 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w8lr3Wt2drAUG', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True)
 exp3.main()
 
-# exp4 = SegmentationTrainingApp(epochs=500, logdir='XE', lr=1e-3, comment='w4lr3', loss_fn='XE', XEweight=4)
+exp4 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w16lr3Wt2drAUG', loss_fn='XE', XEweight=16, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True)
 # exp4.main()
 
-# exp5 = SegmentationTrainingApp(epochs=500, logdir='XE', comment='w6lr3', loss_fn='XE', XEweight=6)
+# exp5 = SegmentationTrainingApp(epochs=250, logdir='type2', lr=1e-3, comment='w8lr3Wt2dr', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, )
 # exp5.main()
 
-# exp6 = SegmentationTrainingApp(epochs=500, logdir='XE', comment='w8lr3', loss_fn='XE', XEweight=8)
+# exp6 = SegmentationTrainingApp(epochs=250, logdir='type2', lr=1e-3, comment='w8lr3Wt2draug', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True)
 # exp6.main()
 
-# exp7 = SegmentationTrainingApp(epochs=1000, logdir='dice', lr=1e-2, comment='dicelr2', loss_fn='dice')
+# exp7 = SegmentationTrainingApp(epochs=250, logdir='type2', lr=1e-3, comment='w8lr3Wt2dradr', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, attn_drop_rate=0.1, )
 # exp7.main()
 
-# exp8 = SegmentationTrainingApp(epochs=1000, logdir='dice', lr=1e-3, comment='dicelr3', loss_fn='dice')
+# exp8 = SegmentationTrainingApp(epochs=250, logdir='type2', lr=1e-3, comment='w8lr3Wt2dradraug', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, attn_drop_rate=0.1, aug=True)
 # exp8.main()
 
 # exp9 = SegmentationTrainingApp(epochs=1000, logdir='dice', lr=1e-4, comment='dicelr4', loss_fn='dice')
 # exp9.main()
 
-# exp9 = SegmentationTrainingApp(epochs=100, logdir='test', lr=1e-4, comment='XEtest', loss_fn='XE', XEweight=2, data_ratio=0.1)
+# exp9 = SegmentationTrainingApp(epochs=10, logdir='test', lr=1e-3, comment='aug', loss_fn='XE', XEweight=3, data_ratio=0.1, overfitting=True,  optimizer_type='adamw', weight_decay=1e-5, swin_type=3, aug=True)
 # exp9.main()
