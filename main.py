@@ -236,6 +236,16 @@ class SegmentationTrainingApp:
                     log.info('E{} Validation {}/{}'.format(epoch_ndx, batch_ndx, len(val_dl)))
 
         return valMetrics.to('cpu'), val_loss, imgs
+    
+    def diceLoss(self, prediction_g, label_g, epsilon=1):
+        diceLabel_g = label_g.sum(dim=[1,2,3,4])
+        dicePrediction_g = prediction_g.sum(dim=[1,2,3,4])
+        diceCorrect_g = (prediction_g * label_g).sum(dim=[1,2,3,4])
+
+        diceRatio_g = (2 * diceCorrect_g + epsilon) \
+            / (dicePrediction_g + diceLabel_g + epsilon)
+
+        return 1 - diceRatio_g
 
     def computeBatchLoss(self, batch_ndx, batch_tup, batch_size, metrics, need_imgs=False):
         batch, masks = batch_tup
@@ -258,7 +268,8 @@ class SegmentationTrainingApp:
         false_pos = neg_count - true_neg
         false_neg = pos_count - true_pos
 
-        dice_score = (2 * true_pos ) / (2 * true_pos + false_pos + false_neg)
+        # dice_score = (2 * true_pos ) / (2 * true_pos + false_pos + false_neg)
+        dice_loss = self.diceLoss(pred_label, masks)
         precision = torch.zeros(true_pos.shape).to(device=self.device)
         division_mask = true_pos + false_pos > 0
         precision[division_mask] = (true_pos[division_mask] / (true_pos[division_mask] + false_pos[division_mask]))
@@ -270,7 +281,7 @@ class SegmentationTrainingApp:
 
         if self.args.loss_fn == 'dice':
             # Trying Dice score as loss function
-            loss = 1 - dice_score
+            loss = dice_loss
             loss.requires_grad = True
         else:
             loss_fn = nn.CrossEntropyLoss(weight=self.XEweight, reduction='none')
@@ -290,7 +301,7 @@ class SegmentationTrainingApp:
         metrics[2, start_ndx:end_ndx] = true_neg
         metrics[3, start_ndx:end_ndx] = false_pos
         metrics[4, start_ndx:end_ndx] = false_neg
-        metrics[5, start_ndx:end_ndx] = dice_score
+        metrics[5, start_ndx:end_ndx] = 1 - dice_loss
         metrics[6, start_ndx:end_ndx] = precision
         metrics[7, start_ndx:end_ndx] = recall
         metrics[10, start_ndx:end_ndx] = (true_pos + true_neg) / masks.size(-1) ** 3
