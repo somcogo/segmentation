@@ -1,15 +1,63 @@
-from torch.utils.data import DataLoader, Dataset
-import torch
-import h5py
-from sklearn.model_selection import train_test_split
-
 import copy
 import glob
 import os
-import nibabel as nib
+import functools
+
 import numpy as np
 from scipy import ndimage
-import functools
+import torch
+from torch.utils.data import DataLoader, Dataset
+import h5py
+import nibabel as nib
+from sklearn.model_selection import train_test_split
+
+from ops import aug_tuple
+
+class NewDataset(Dataset):
+    def __init__(self, data_path, mode, aug=False):
+        super().__init__()
+        alt_file = h5py.File(os.path.join(data_path, 'alt.hdf5'), 'r')
+        neu_file = h5py.File(os.path.join(data_path, 'neu.hdf5'), 'r')
+        if mode == 'trn':
+            alt_start_ndx = 0
+            alt_end_ndx = 138
+            neu_start_ndx = 0
+            neu_end_ndx = 114
+        else:
+            alt_start_ndx = 138
+            alt_end_ndx = 172
+            neu_start_ndx = 114
+            neu_end_ndx = 143
+        self.alt_img_ds = alt_file['img'][alt_start_ndx:alt_end_ndx]
+        self.neu_img_ds = neu_file['img'][neu_start_ndx:neu_end_ndx]
+        self.alt_mask_ds = alt_file['mask'][alt_start_ndx:alt_end_ndx]
+        self.neu_mask_ds = neu_file['mask'][neu_start_ndx:neu_end_ndx]
+        alt_id_ds = alt_file['patient_id'][alt_start_ndx:alt_end_ndx]
+        self.alt_id_list = np.array(alt_id_ds.asstr()[()], dtype=int)
+        neu_id_ds = neu_file['patient_id'][neu_start_ndx:neu_end_ndx]
+        self.neu_id_list = np.array(neu_id_ds.asstr()[()], dtype=int)
+        self.aug = aug
+
+    def __len__(self):
+        return len(self.alt_id_ds) + len(self.neu_id_ds)
+    
+    def __getitem__(self, index):
+        if index < 139:
+            image_np = np.array(self.alt_img_ds[index])
+            image = torch.from_numpy(image_np)
+            mask_np = np.array(self.alt_mask_ds[index])
+            mask = torch.from_numpy(mask_np)
+            img_id = self.alt_id_list[index]
+        else:
+            index = index - 139
+            image_np = np.array(self.neu_img_ds[index])
+            image = torch.from_numpy(image_np)
+            mask_np = np.array(self.neu_mask_ds[index])
+            mask = torch.from_numpy(mask_np)
+            img_id = self.neu_id_list[index]
+        if self.aug:
+            image, mask = aug_tuple(image, mask)
+        return image, mask, img_id
 
 def getTupleListHDF5():
     raw_path_list_alt = glob.glob('../data/segmentation/alt/*')
