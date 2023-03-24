@@ -14,7 +14,7 @@ from monai.metrics.hausdorff_distance import compute_hausdorff_distance
 
 from models.swinunetr import SwinUNETR
 from utils.logconf import logging
-from utils.data_loader import getDataLoaderHDF5
+from utils.data_loader import getDataLoaderHDF5, getNewDataLoader
 
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
@@ -86,7 +86,7 @@ class SegmentationTrainingApp:
         return Adam(params=self.model.parameters(), lr=self.args.lr)
 
     def initDl(self):
-        return getDataLoaderHDF5(batch_size=self.args.batch_size, image_size=self.args.image_size, num_workers=48, data_ratio=self.args.data_ratio, persistent_workers=True)
+        return getNewDataLoader(batch_size=self.args.batch_size)
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:

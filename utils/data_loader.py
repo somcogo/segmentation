@@ -11,7 +11,7 @@ import h5py
 import nibabel as nib
 from sklearn.model_selection import train_test_split
 
-from ops import aug_tuple
+from .ops import aug_tuple
 
 class NewDataset(Dataset):
     def __init__(self, data_path, mode, aug=False):
@@ -33,13 +33,13 @@ class NewDataset(Dataset):
         self.alt_mask_ds = alt_file['mask'][alt_start_ndx:alt_end_ndx]
         self.neu_mask_ds = neu_file['mask'][neu_start_ndx:neu_end_ndx]
         alt_id_ds = alt_file['patient_id'][alt_start_ndx:alt_end_ndx]
-        self.alt_id_list = np.array(alt_id_ds.asstr()[()], dtype=int)
+        self.alt_id_list = np.array(alt_id_ds, dtype=int)
         neu_id_ds = neu_file['patient_id'][neu_start_ndx:neu_end_ndx]
-        self.neu_id_list = np.array(neu_id_ds.asstr()[()], dtype=int)
+        self.neu_id_list = np.array(neu_id_ds, dtype=int)
         self.aug = aug
 
     def __len__(self):
-        return len(self.alt_id_ds) + len(self.neu_id_ds)
+        return len(self.alt_id_list) + len(self.neu_id_list)
     
     def __getitem__(self, index):
         if index < 139:
@@ -57,7 +57,14 @@ class NewDataset(Dataset):
             img_id = self.neu_id_list[index]
         if self.aug:
             image, mask = aug_tuple(image, mask)
-        return image, mask, img_id
+        return image.unsqueeze(0), mask.unsqueeze(0), img_id
+    
+def getNewDataLoader(batch_size):
+    trn_ds = NewDataset(data_path='../data/segmentation', mode='trn', aug=True)
+    val_ds = NewDataset(data_path='../data/segmentation', mode='val', aug=False)
+    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=8)
+    return trn_dl, val_dl
 
 def getTupleListHDF5():
     raw_path_list_alt = glob.glob('../data/segmentation/alt/*')
