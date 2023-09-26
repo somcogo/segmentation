@@ -1,18 +1,23 @@
 from main import SegmentationTrainingApp
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+import torch
 
-exp1 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w4lr3Wt2drAUG', loss_fn='XE', XEweight=4, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True)
-exp1.main()
+os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 
-# exp2 = SegmentationTrainingApp(epochs=2500, logdir='type2', lr=1e-2, comment='w4lr2Wt2drAUG', loss_fn='XE', XEweight=4, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True)
+torch.set_num_threads(8)
+# exp1 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w2lr3Wt2drAUGs2', loss_fn='XE', XEweight=2, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True, scheduler_type='cosinewarmre', batch_size=32)
+# exp1.main()
+
+# exp2 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w4lr3Wt2drAUGs2', loss_fn='XE', XEweight=4, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True, scheduler_type='cosinewarmre', batch_size=32)
 # exp2.main()
 
-exp3 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w8lr3Wt2drAUG', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True)
+# exp3 = SegmentationTrainingApp(epochs=10000, logdir='test', lr=1e-3, comment='debugging', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True, scheduler_type='cosinewarmre', batch_size=32)
+# exp3.main()
+exp3 = SegmentationTrainingApp(epochs=10000, logdir='performancecheck', lr=1e-3, comment='e10000-b32-lr3-lfXE-XEweight-8-adamw-swinttpye2-droprate0.1-augTrue-cosinewarmre-newDL', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True, scheduler_type='cosinewarmre', batch_size=32)
 exp3.main()
 
-exp4 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w16lr3Wt2drAUG', loss_fn='XE', XEweight=16, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True)
+# exp4 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w16lr3Wt2drAUGs2', loss_fn='XE', XEweight=16, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True, scheduler_type='cosinewarmre', batch_size=32)
 # exp4.main()
 
 # exp5 = SegmentationTrainingApp(epochs=250, logdir='type2', lr=1e-3, comment='w8lr3Wt2dr', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, )

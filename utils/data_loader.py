@@ -1,16 +1,62 @@
+import copy
+import glob
+import os
+import functools
+
+import nibabel as nib
+import h5py
+import numpy as np
+from scipy import ndimage
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms.functional as F
 import torch
 from sklearn.model_selection import train_test_split
 
-import copy
-import glob
-import os
-import nibabel as nib
-import h5py
-import numpy as np
-from scipy import ndimage
-import functools
+from utils.ops import aug_tuple
+
+class NewDataset(Dataset):
+    def __init__(self, data_path, mode, aug=False):
+        super().__init__()
+        alt_file = h5py.File(os.path.join(data_path, 'alt.hdf5'), 'r')
+        neu_file = h5py.File(os.path.join(data_path, 'neu.hdf5'), 'r')
+        if mode == 'trn':
+            alt_start_ndx = 0
+            alt_end_ndx = 138
+            neu_start_ndx = 0
+            neu_end_ndx = 114
+        else:
+            alt_start_ndx = 138
+            alt_end_ndx = 172
+            neu_start_ndx = 114
+            neu_end_ndx = 143
+        self.alt_img_ds = np.array(alt_file['img'])[alt_start_ndx:alt_end_ndx]
+        self.neu_img_ds = np.array(neu_file['img'])[neu_start_ndx:neu_end_ndx]
+        self.alt_mask_ds = np.array(alt_file['mask'])[alt_start_ndx:alt_end_ndx]
+        self.neu_mask_ds = np.array(neu_file['mask'])[neu_start_ndx:neu_end_ndx]
+        self.data = np.concatenate([self.alt_img_ds, self.neu_img_ds], axis=0)
+        self.mask = np.concatenate([self.alt_mask_ds, self.neu_mask_ds], axis=0)
+        alt_id_ds = np.array(alt_file['patient_id'][alt_start_ndx:alt_end_ndx], dtype=int)
+        neu_id_ds = np.array(neu_file['patient_id'][neu_start_ndx:neu_end_ndx], dtype=int)
+        self.id_list = np.concatenate([alt_id_ds, neu_id_ds], axis=0, dtype=int)
+        self.aug = aug
+
+    def __len__(self):
+        return len(self.id_list)
+    
+    def __getitem__(self, index):
+        image = self.data[index]
+        mask = self.mask[index]
+        img_id = self.id_list[index]
+        if self.aug:
+            image, mask = aug_tuple(image, mask)
+        return torch.from_numpy(image).unsqueeze(0), torch.from_numpy(mask).unsqueeze(0), img_id
+    
+def getNewDataLoader(batch_size, persistent_workers=True, aug=True):
+    trn_ds = NewDataset(data_path='data', mode='trn', aug=aug)
+    val_ds = NewDataset(data_path='data', mode='val', aug=False)
+    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8, persistent_workers=persistent_workers)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=8, persistent_workers=persistent_workers)
+    return trn_dl, val_dl
 
 def getTupleListHDF5():
     raw_path_list_alt = glob.glob('../../data/segmentation/alt/*')
