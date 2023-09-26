@@ -12,6 +12,8 @@ from time import time
 
 t1 = time()
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+
 class SwinUNETRModule(pl.LightningModule):
 	def __init__(self,
 		img_size=64,
@@ -55,12 +57,16 @@ class SwinUNETRModule(pl.LightningModule):
 		out = self.head(features)
 		loss_fn = nn.CrossEntropyLoss(reduction='sum')
 		y = y.long()
-		loss = loss_fn(out.view(1, 2, -1), y.view(1, -1))
-		self.log('val_loss', loss)
+		loss = loss_fn(out, y.squeeze(dim=1))
+		self.log('val_loss', loss, sync_dist=True)
 
 # data
 image_size = 64
-train_loader, val_loader = getDataLoaderHDF5(batch_size=1, image_size=image_size, num_workers=24)
+train_loader, val_loader = getDataLoaderHDF5(
+	batch_size=16,
+	image_size=image_size,
+	num_workers=64,
+	persistent_workers=True)
 
 # model
 model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
@@ -70,14 +76,13 @@ logger = TensorBoardLogger(save_dir=os.getcwd(), version=3, name="lightning_logs
 
 # training
 trainer = pl.Trainer(
+	strategy='ddp',
 	accelerator='gpu',
 	max_epochs=2,
 	limit_train_batches=1.0,
 	logger=logger,
-	log_every_n_steps=10,
+	log_every_n_steps=10
 	)
-trainer.fit(model, train_loader, val_loader)
 
-t2 = time()
-print(t2 - t1)
-    
+if __name__ == '__main__':
+    trainer.fit(model, train_loader, val_loader)
