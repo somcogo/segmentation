@@ -22,45 +22,28 @@ log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
 class SegmentationTrainingApp:
-    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, data_ratio=None, comment=None, XEweight=None, loss_fn='XE'):
-        if sys_argv is None:
-            sys_argv = sys.argv[1:]
+    def __init__(self, epochs=10, batch_size=16, logdir='test',
+                 in_channels=1, lr=1e-3, comment='dwlpt', image_size=64,
+                 data_ratio=1.0, XEweight=None, loss_fn='XE'):
 
-        parser = argparse.ArgumentParser(description="Test training")
-        parser.add_argument("--epochs", default=10, type=int, help="number of training epochs")
-        parser.add_argument("--batch_size", default=16, type=int, help="number of batch size")
-        parser.add_argument("--logdir", default="test", type=str, help="directory to save the tensorboard logs")
-        parser.add_argument("--in_channels", default=1, type=int, help="number of image channels")
-        parser.add_argument("--lr", default=1e-3, type=float, help="learning rate")
-        parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')
-        parser.add_argument("--image_size", default=64, type=int, help="image size  used for learning")
-        parser.add_argument('--data_ratio', default=1.0, type=float, help="what ratio of data to use")
-        parser.add_argument('--XEweight', default=None, type=float, help="weight of the second class in Cross Entropy Loss")
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.logdir_name = logdir
+        self.in_channels = in_channels
+        self.lr = lr
+        self.comment = comment
+        self.image_size = image_size
+        self.data_ratio = data_ratio
+        self.XEweight = XEweight
+        self.loss_fn = loss_fn
 
-        self.args = parser.parse_args()
-        if epochs:
-            self.args.epochs = epochs
-        if batch_size:
-            self.args.batch_size = batch_size
-        if logdir:
-            self.args.logdir = logdir
-        if lr:
-            self.args.lr = lr
-        if data_ratio:
-            self.args.data_ratio = data_ratio
-        if comment:
-            self.args.comment = comment
-        if XEweight:
-            self.args.XEweight = XEweight
-        if loss_fn:
-            self.args.loss_fn = loss_fn
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
-        self.logdir = os.path.join('./runs', self.args.logdir)
+        self.logdir = os.path.join('./runs', self.logdir_name)
         os.makedirs(self.logdir, exist_ok=True)
-        if self.args.XEweight != None:
-            self.XEweight = torch.Tensor([1, self.args.XEweight])
+        if self.XEweight is not None:
+            self.XEweight = torch.Tensor([1, self.XEweight])
             self.XEweight = self.XEweight.to(device=self.device)
         else:
             self.XEweight = None
@@ -72,7 +55,7 @@ class SegmentationTrainingApp:
         self.optimizer = self.initOptimizer()
 
     def initModel(self):
-        model = SwinUNETR(img_size=self.args.image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
+        model = SwinUNETR(img_size=self.image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
         param_num = sum(p.numel() for p in model.parameters())
         log.info('Initiated model with {} params'.format(param_num))
         if self.use_cuda:
@@ -83,17 +66,17 @@ class SegmentationTrainingApp:
         return model
 
     def initOptimizer(self):
-        return Adam(params=self.model.parameters(), lr=self.args.lr)
+        return Adam(params=self.model.parameters(), lr=self.lr)
 
     def initDl(self):
-        return getNewDataLoader(batch_size=self.args.batch_size)
+        return getNewDataLoader(batch_size=self.batch_size)
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
             self.trn_writer = SummaryWriter(
-                log_dir=self.logdir + '/trn-' + self.args.comment)
+                log_dir=self.logdir + '/trn-' + self.comment)
             self.val_writer = SummaryWriter(
-                log_dir=self.logdir + '/val-' + self.args.comment)
+                log_dir=self.logdir + '/val-' + self.comment)
 
     def main(self):
         log.info("Starting {}, {}".format(type(self).__name__, self.args))
@@ -102,16 +85,16 @@ class SegmentationTrainingApp:
 
         val_best = 1e8
         validation_cadence = 5
-        for epoch_ndx in range(1, self.args.epochs + 1):
+        for epoch_ndx in range(1, self.epochs + 1):
             logging_index = (epoch_ndx < 10) or (epoch_ndx % 5 == 0 and epoch_ndx < 50) or (epoch_ndx % 50 == 0 and epoch_ndx < 500) or epoch_ndx % 250 == 0
 
             if logging_index:
                 log.info("Epoch {} of {}, {}/{} batches of size {}*{}".format(
                     epoch_ndx,
-                    self.args.epochs,
+                    self.epochs,
                     len(train_dl),
                     len(val_dl),
-                    self.args.batch_size,
+                    self.batch_size,
                     (torch.cuda.device_count() if self.use_cuda else 1),
                 ))
 
@@ -142,7 +125,7 @@ class SegmentationTrainingApp:
             loss = self.computeBatchLoss(
                 batch_ndx,
                 batch_tuple,
-                self.args.batch_size,
+                self.batch_size,
                 trnMetrics)
 
             loss.backward()
@@ -167,7 +150,7 @@ class SegmentationTrainingApp:
                 val_loss, imgs = self.computeBatchLoss(
                     batch_ndx,
                     batch_tuple,
-                    self.args.batch_size,
+                    self.batch_size,
                     valMetrics,
                     need_imgs=True
                 )
@@ -182,8 +165,6 @@ class SegmentationTrainingApp:
         masks = masks.to(device=self.device, non_blocking=True)
         masks = masks.long()
         prediction, probabilities = self.model(batch)
-
-
 
         pred_label = torch.argmax(probabilities, dim=1, keepdim=True, out=None)
         pos_pred = pred_label > 0
@@ -200,13 +181,7 @@ class SegmentationTrainingApp:
         false_neg = pos_count - true_pos
 
         dice_score = (2 * true_pos ) / (2 * true_pos + false_pos + false_neg)
-        # dice_calculator = GeneralizedDiceScore()
-        # pred_label = pred_label.to(device='cpu')
-        # masks = masks.to(device='cpu')
-        # dice_score = dice_calculator(y_pred=pred_label, y=masks)
-        # pred_label = pred_label.to(device=self.device)
-        # masks = masks.to(device=self.device)
-        # dice_score = dice_score.to(device=self.device)
+        
         precision = torch.zeros(true_pos.shape).to(device=self.device)
         division_mask = true_pos + false_pos > 0
         precision[division_mask] = (true_pos[division_mask] / (true_pos[division_mask] + false_pos[division_mask]))
@@ -214,7 +189,7 @@ class SegmentationTrainingApp:
         recall = true_pos / (true_pos + false_neg)
         hd_dist = compute_hausdorff_distance(y_pred=pred_label, y=masks, percentile=95, include_background=False)
 
-        if self.args.loss_fn == 'dice':
+        if self.loss_fn == 'dice':
             # Trying Dice score as loss function
             loss = 1 - dice_score
             loss.requires_grad = True
@@ -225,7 +200,7 @@ class SegmentationTrainingApp:
         start_ndx = batch_ndx * batch_size
         end_ndx = start_ndx + masks.size(0)
 
-        if self.args.loss_fn == 'dice':
+        if self.loss_fn == 'dice':
             metrics[0, start_ndx:end_ndx] = loss
         else:
             metrics[0, start_ndx:end_ndx] = loss.sum(dim=[1, 2, 3])
@@ -245,15 +220,15 @@ class SegmentationTrainingApp:
         metrics[13, start_ndx:end_ndx] = hd_dist.squeeze()
 
         if need_imgs:
-            slice1 = prediction[0, 1, :, :, self.args.image_size // 2].unsqueeze(0)
-            slice2 = prediction[0, 1, :, self.args.image_size // 2, :].unsqueeze(0)
-            slice3 = prediction[0, 1, self.args.image_size // 2, :, :].unsqueeze(0)
-            segmentation1 = pred_label[0, 0, :, :, self.args.image_size // 2].unsqueeze(0)
-            segmentation2 = pred_label[0, 0, :, self.args.image_size // 2, :].unsqueeze(0)
-            segmentation3 = pred_label[0, 0, self.args.image_size // 2, :, :].unsqueeze(0)
-            ground_truth1 = (masks[0, 0, :, :, self.args.image_size // 2] > 0).unsqueeze(0)
-            ground_truth2 = (masks[0, 0, :, self.args.image_size // 2, :] > 0).unsqueeze(0)
-            ground_truth3 = (masks[0, 0, self.args.image_size // 2, :, :] > 0).unsqueeze(0)
+            slice1 = prediction[0, 1, :, :, self.image_size // 2].unsqueeze(0)
+            slice2 = prediction[0, 1, :, self.image_size // 2, :].unsqueeze(0)
+            slice3 = prediction[0, 1, self.image_size // 2, :, :].unsqueeze(0)
+            segmentation1 = pred_label[0, 0, :, :, self.image_size // 2].unsqueeze(0)
+            segmentation2 = pred_label[0, 0, :, self.image_size // 2, :].unsqueeze(0)
+            segmentation3 = pred_label[0, 0, self.image_size // 2, :, :].unsqueeze(0)
+            ground_truth1 = (masks[0, 0, :, :, self.image_size // 2] > 0).unsqueeze(0)
+            ground_truth2 = (masks[0, 0, :, self.image_size // 2, :] > 0).unsqueeze(0)
+            ground_truth3 = (masks[0, 0, self.image_size // 2, :, :] > 0).unsqueeze(0)
             predicted1 = torch.concat([segmentation1, ground_truth1, ground_truth1], dim=0)
             predicted2 = torch.concat([segmentation2, ground_truth2, ground_truth2], dim=0)
             predicted3 = torch.concat([segmentation3, ground_truth3, ground_truth3], dim=0)
@@ -320,11 +295,11 @@ class SegmentationTrainingApp:
     def saveModel(self, type_str, epoch_ndx, isBest=False):
         file_path = os.path.join(
             'saved_models',
-            self.args.logdir,
+            self.logdir_name,
             '{}_{}_{}.{}.state'.format(
                 type_str,
                 self.time_str,
-                self.args.comment,
+                self.comment,
                 self.totalTrainingSamples_count
             )
         )
@@ -351,11 +326,11 @@ class SegmentationTrainingApp:
         if isBest:
             best_path = os.path.join(
                 'saved_models',
-                self.args.logdir,
+                self.logdir_name,
                 '{}_{}_{}.{}.state'.format(
                     type_str,
                     self.time_str,
-                    self.args.comment,
+                    self.comment,
                     'best'
                 )
             )

@@ -13,6 +13,76 @@ from sklearn.model_selection import train_test_split
 
 from .ops import aug_tuple
 
+class AltDataset(Dataset):
+    def __init__(self, data_path, mode, aug):
+        super().__init__()
+        alt_file = h5py.File(os.path.join(data_path, 'alt.hdf5'), 'r')
+        if mode == 'trn':
+            alt_start_ndx = 0
+            alt_end_ndx = 138
+        else:
+            alt_start_ndx = 138
+            alt_end_ndx = 172
+        self.alt_img_ds = alt_file['img'][alt_start_ndx:alt_end_ndx]
+        self.alt_mask_ds = alt_file['mask'][alt_start_ndx:alt_end_ndx]
+        alt_id_ds = alt_file['patient_id'][alt_start_ndx:alt_end_ndx]
+        self.alt_id_list = np.array(alt_id_ds, dtype=int)
+        self.aug = aug
+
+    def __len__(self):
+        return len(self.alt_id_list)
+    
+    def __getitem__(self, index):
+        image_np = np.array(self.alt_img_ds[index, :, :, :])
+        mask_np = np.array(self.alt_mask_ds[index, :, :, :])
+        if self.aug:
+            image_np, mask_np = aug_tuple(image_np, mask_np)
+        image = torch.from_numpy(image_np)
+        mask = torch.from_numpy(mask_np)
+        img_id = self.alt_id_list[index]
+        return image, mask, img_id
+
+class NeuDataset(Dataset):
+    def __init__(self, data_path, mode, aug):
+        super().__init__()
+        neu_file = h5py.File(os.path.join(data_path, 'neu.hdf5'), 'r')
+        if mode == 'trn':
+            neu_start_ndx = 0
+            neu_end_ndx = 114
+        else:
+            neu_start_ndx = 114
+            neu_end_ndx = 143
+        self.neu_img_ds = neu_file['img'][neu_start_ndx:neu_end_ndx]
+        self.neu_mask_ds = neu_file['mask'][neu_start_ndx:neu_end_ndx]
+        neu_id_ds = neu_file['patient_id'][neu_start_ndx:neu_end_ndx]
+        self.neu_id_list = np.array(neu_id_ds, dtype=int)
+        self.aug = aug
+
+    def __len__(self):
+        return len(self.neu_id_list)
+    
+    def __getitem__(self, index):
+        image_np = np.array(self.neu_img_ds[index])
+        mask_np = np.array(self.neu_mask_ds[index])
+        if self.aug:
+            image_np, mask_np = aug_tuple(image_np, mask_np)
+        image = torch.from_numpy(image_np)
+        mask = torch.from_numpy(mask_np)
+        img_id = self.neu_id_list[index]
+        return image, mask, img_id
+
+def getAltNeuDataLoader(batch_size):
+    alt_trn_ds = AltDataset(data_path='../data/segmentation', mode='trn', aug=True)    
+    alt_val_ds = AltDataset(data_path='../data/segmentation', mode='val', aug=False)
+    neu_trn_ds = NeuDataset(data_path='../data/segmentation', mode='trn', aug=True)
+    neu_val_ds = NeuDataset(data_path='../data/segmentation', mode='val', aug=False)
+    alt_trn_dl = DataLoader(alt_trn_ds, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8)
+    alt_val_dl = DataLoader(alt_val_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=8)
+    neu_trn_dl = DataLoader(neu_trn_ds, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8)
+    neu_val_dl = DataLoader(neu_val_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=8)
+    return alt_trn_dl, alt_val_dl, neu_trn_dl, neu_val_dl
+
+
 class NewDataset(Dataset):
     def __init__(self, data_path, mode, aug=False):
         super().__init__()
@@ -28,33 +98,37 @@ class NewDataset(Dataset):
             alt_end_ndx = 172
             neu_start_ndx = 114
             neu_end_ndx = 143
-        self.alt_img_ds = alt_file['img'][alt_start_ndx:alt_end_ndx]
-        self.neu_img_ds = neu_file['img'][neu_start_ndx:neu_end_ndx]
-        self.alt_mask_ds = alt_file['mask'][alt_start_ndx:alt_end_ndx]
-        self.neu_mask_ds = neu_file['mask'][neu_start_ndx:neu_end_ndx]
-        alt_id_ds = alt_file['patient_id'][alt_start_ndx:alt_end_ndx]
-        self.alt_id_list = np.array(alt_id_ds, dtype=int)
-        neu_id_ds = neu_file['patient_id'][neu_start_ndx:neu_end_ndx]
-        self.neu_id_list = np.array(neu_id_ds, dtype=int)
+        self.alt_img_ds = np.array(alt_file['img'])[alt_start_ndx:alt_end_ndx]
+        self.neu_img_ds = np.array(neu_file['img'])[neu_start_ndx:neu_end_ndx]
+        self.alt_mask_ds = np.array(alt_file['mask'])[alt_start_ndx:alt_end_ndx]
+        self.neu_mask_ds = np.array(neu_file['mask'])[neu_start_ndx:neu_end_ndx]
+        self.data = np.concatenate([self.alt_img_ds, self.neu_img_ds], axis=0)
+        self.mask = np.concatenate([self.alt_mask_ds, self.neu_mask_ds], axis=0)
+        alt_id_ds = np.array(alt_file['patient_id'][alt_start_ndx:alt_end_ndx], dtype=int)
+        neu_id_ds = np.array(neu_file['patient_id'][neu_start_ndx:neu_end_ndx], dtype=int)
+        self.id_list = np.concatenate([alt_id_ds, neu_id_ds], axis=0, dtype=int)
         self.aug = aug
 
     def __len__(self):
-        return len(self.alt_id_list) + len(self.neu_id_list)
+        return len(self.id_list)
     
     def __getitem__(self, index):
-        if index < 139:
-            image_np = np.array(self.alt_img_ds[index])
-            image = torch.from_numpy(image_np)
-            mask_np = np.array(self.alt_mask_ds[index])
-            mask = torch.from_numpy(mask_np)
-            img_id = self.alt_id_list[index]
-        else:
-            index = index - 139
-            image_np = np.array(self.neu_img_ds[index])
-            image = torch.from_numpy(image_np)
-            mask_np = np.array(self.neu_mask_ds[index])
-            mask = torch.from_numpy(mask_np)
-            img_id = self.neu_id_list[index]
+        # if index < 139:
+        #     image_np = np.array(self.alt_img_ds[index])
+        #     image = torch.from_numpy(image_np)
+        #     mask_np = np.array(self.alt_mask_ds[index])
+        #     mask = torch.from_numpy(mask_np)
+        #     img_id = self.alt_id_list[index]
+        # else:
+        #     index = index - 139
+        #     image_np = np.array(self.neu_img_ds[index])
+        #     image = torch.from_numpy(image_np)
+        #     mask_np = np.array(self.neu_mask_ds[index])
+        #     mask = torch.from_numpy(mask_np)
+        #     img_id = self.neu_id_list[index]
+        image = torch.from_numpy(self.data[index])
+        mask = torch.from_numpy(self.mask[index])
+        img_id = self.id_list[index]
         if self.aug:
             image, mask = aug_tuple(image, mask)
         return image.unsqueeze(0), mask.unsqueeze(0), img_id
