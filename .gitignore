@@ -1,7 +1,13 @@
 data/
 runs/
 lightning_logs/
-__pycache__
 server_runs/
 saved_models/
 notebook.ipynb
+models/__pycache__/
+utils/__pycache__/
+.gitignore
+dummy.py
+test-trn-dwlpt/
+test-val-dwlpt/
+__pycache__/

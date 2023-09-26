@@ -1,10 +1,21 @@
-import nibabel as nib
-import os
-import matplotlib.pyplot as plt
-import csv
-import json
+from models.swin_transformer_block import SwinTransformerBlock, PatchEmbed, SwinTransformer
+from models.unetblocks import UNetConvBlock, UNetUpBlock
+import torch
+from utils.data_loader import getDataLoader, getImages
+import torch.nn as nn
 
-with open('./data/verse19/dataset-verse19test/derivatives/sub-verse032/sub-verse032_seg-vb_ctd.json') as f:
-    data = json.load(f)
-    for x in data[1:-1]:
-        print(x['label'])
+trn, val = getDataLoader(
+	batch_size=1,
+	image_size=64,
+	persistent_workers=True)
+
+img, mask = getImages(4122560, 'altesCT', 64)
+print(img.shape)
+img, mask = getImages(4140811, 'altesCT', 64)
+print(img.shape)
+img, mask = getImages(4141097, 'altesCT', 64)
+print(img.shape)
+print('loaded successfully')
+for i, batch in enumerate(trn):
+    print(batch[0].shape)
+
