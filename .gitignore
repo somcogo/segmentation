@@ -1,2 +1,7 @@
 data/
 runs/
+lightning_logs/
+__pycache__
+server_runs/
+saved_models/
+notebook.ipynb
