@@ -3,9 +3,9 @@ import os
 
 import torch
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4"
 
-torch.set_num_threads(8)
+# torch.set_num_threads(8)
 # exp1 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w2lr3Wt2drAUGs2', loss_fn='XE', XEweight=2, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True, scheduler_type='cosinewarmre', batch_size=32)
 # exp1.main()
 
@@ -14,7 +14,7 @@ torch.set_num_threads(8)
 
 # exp3 = SegmentationTrainingApp(epochs=10000, logdir='test', lr=1e-3, comment='debugging', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True, scheduler_type='cosinewarmre', batch_size=32)
 # exp3.main()
-exp3 = SegmentationTrainingApp(epochs=10000, logdir='performancecheck', lr=1e-3, comment='e10000-b32-lr3-lfXE-XEweight-8-adamw-swinttpye2-droprate0.1-augTrue-cosinewarmre-newDL', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True, scheduler_type='cosinewarmre', batch_size=32)
+exp3 = SegmentationTrainingApp(epochs=10000, logdir='performancecheck', lr=1e-3, batch_size=4, comment='e10000-b4-lr3-lfXE-XEweight-8-adamw-swinttpye2-droprate0.1-augTrue-cosinewarmre-newDL', loss_fn='XE', XEweight=8, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True, scheduler_type='cosinewarmre')
 exp3.main()
 
 # exp4 = SegmentationTrainingApp(epochs=10000, logdir='type2', lr=1e-3, comment='w16lr3Wt2drAUGs2', loss_fn='XE', XEweight=16, optimizer_type='adamw', weight_decay=1e-5, swin_type=2, drop_rate=0.1, aug=True, scheduler_type='cosinewarmre', batch_size=32)

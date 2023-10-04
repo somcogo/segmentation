@@ -34,7 +34,7 @@ class SegmentationTrainingApp:
                  optimizer_type='adam', weight_decay=0, betas=(0.9, 0.999),
                  abs_pos_emb=False, scheduler_type=None, swin_type=1,
                  aug=False, drop_rate=0, attn_drop_rate=0, image_size=64,
-                 in_channels=1):
+                 in_channels=1, T_0=2000):
         
         self.settings = copy.deepcopy(locals())
         del self.settings['self']
@@ -60,6 +60,7 @@ class SegmentationTrainingApp:
         self.attn_drop_rate = attn_drop_rate
         self.image_size = image_size
         self.in_channels = in_channels
+        self.T_0 = T_0
 
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
@@ -126,7 +127,7 @@ class SegmentationTrainingApp:
 
     def initScheduler(self):
         if self.scheduler_type == 'cosinewarmre':
-            return CosineAnnealingWarmRestarts(self.optimizer, 2000)
+            return CosineAnnealingWarmRestarts(self.optimizer, self.T_0)
         else:
             return None
 
