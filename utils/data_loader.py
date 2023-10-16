@@ -14,6 +14,46 @@ from sklearn.model_selection import train_test_split
 
 from utils.ops import aug_tuple
 
+class DatasetV2(Dataset):
+    def __init__(self, data_path, mode, aug=False, section='large'):
+        super().__init__()
+        file = h5py.File(os.path.join(data_path, 'segmentation_{}.hdf5'.format(mode)), 'r')
+        self.mode = mode
+        self.section = section
+        self.img_ds = file['img']
+        self.mask_ds = file['mask']
+        self.id_list = file.attrs['id_list']
+        self.aug = aug
+
+    def __len__(self):
+        return len(self.id_list)
+    
+    def __getitem__(self, index):
+        if self.section == 'large':
+            x1, x2, y1, y2, z1, z2 = [6, 294, 6, 294, 0, 144]
+        elif self.section == 'random':
+            rng = np.random.default_rng()
+            x1 = rng.integers(0, 156)
+            y1 = rng.integers(0, 156)
+            z1 = rng.integers(0, 6)
+            x2 = x1 + 144
+            y2 = y1 + 144
+            z2 = z1 + 144
+        image = np.array(self.img_ds[index, x1:x2, y1:y2, z1:z2])
+        mask = np.array(self.mask_ds[index, x1:x2, y1:y2, z1:z2])
+        img_id = self.id_list[index]
+        if self.aug:
+            image, mask = aug_tuple(image, mask)
+        return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0), img_id.tolist()
+    
+def getDataLoaderv2(batch_size, persistent_workers=True, aug=True, section='large'):
+    trn_ds = DatasetV2(data_path='data', mode='trn', aug=aug, section=section)
+    val_ds = DatasetV2(data_path='data', mode='val', aug=False, section=section)
+    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8, persistent_workers=persistent_workers)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=8, persistent_workers=persistent_workers)
+    return trn_dl, val_dl
+
+
 class NewDataset(Dataset):
     def __init__(self, data_path, mode, aug=False):
         super().__init__()
@@ -49,7 +89,7 @@ class NewDataset(Dataset):
         img_id = self.id_list[index]
         if self.aug:
             image, mask = aug_tuple(image, mask)
-        return torch.from_numpy(image).unsqueeze(0), torch.from_numpy(mask).unsqueeze(0), img_id
+        return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0), img_id
     
 def getNewDataLoader(batch_size, persistent_workers=True, aug=True):
     trn_ds = NewDataset(data_path='data', mode='trn', aug=aug)
