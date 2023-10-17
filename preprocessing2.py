@@ -4,84 +4,40 @@ import time
 
 import h5py
 import numpy as np
+import torch
+from scipy import ndimage
 
-# f_alt = h5py.File('../data/segmentation/alt.hdf5', 'w')
+f = h5py.File('../data/segmentation.hdf5', 'a')
+id_data = torch.load('../data/segmentation_id_data.pt')
 
-# f_alt.create_dataset('img', shape=(172, 64, 64, 64), chunks=(1, 64, 64, 64), dtype='float32')
-# alt_img_ds = f_alt['img']
-# f_alt.create_dataset('mask', shape=(172, 64, 64, 64), chunks=(1, 64, 64, 64), dtype='float32')
-# alt_mask_ds = f_alt['mask']
+for mode in ['trn', 'val']:
+    mode_group = f.create_group(mode)
+    scan_count = sum([len(site_list) for site_list in id_data[mode].values()])
+    mode_group.create_dataset('img', shape=(scan_count, 350, 350, 150), chunks=(1, 350, 350, 150), dtype='f')
+    mode_group.create_dataset('mask',  shape=(scan_count, 350, 350, 150), chunks=(1, 350, 350, 150), dtype='i8')
 
-# alt_path_list = glob.glob('../data/segmentation/alt/*')
-# alt_id_list = []
-# for i, path in enumerate(alt_path_list):
-#     t1 = time.time()
-#     id = os.path.split(path)[-1][:7]
-#     alt_id_list.append(id)
+    for site in ['alt', 'neu', 'asbach']:
+        old_file = h5py.File('../data/segmentation_original_{}_{}.hdf5'.format(mode, site), 'a')
+        for ndx, img_id in enumerate(id_data[mode][site]):
+            t1 = time.time()
+            if site == 'neu':
+                ndx = ndx + len(id_data[mode]['alt'])
+            elif site == 'asbach':
+                ndx = ndx + len(id_data[mode]['alt']) + len(id_data[mode]['neu'])
+            old_img = np.array(old_file[mode][site][str(img_id)])
+            old_mask = np.array(old_file[mode][site][str(img_id)+'_mask'])
+            center = ndimage.center_of_mass(old_img[:,:,-100])
+            center = (int(center[0]), int(center[1]))
 
-#     file = h5py.File('../data/segmentation/alt/{}.hdf5'.format(id), 'r')
-#     img = np.array(file['img'][:])
-#     mask = np.array(file['mask'][:])
+            new_img = old_img[center[0]-175:center[0]+175, center[1]-150:center[1]+200, -150:]
+            x_pad, y_pad, z_pad = 350-new_img.shape[0], 350-new_img.shape[1], 150-new_img.shape[2]
+            new_img = np.pad(new_img, ((0, x_pad), (0, y_pad), (0, z_pad)))
+            mode_group['img'][ndx] = new_img
 
-#     center_coord = file.attrs['center_coords']
-#     center_coord = center_coord.astype(int)
-#     side_length = 64 // 2
-#     img = img[
-#         center_coord[0] - side_length: center_coord[0] + side_length,
-#         center_coord[1] - side_length: center_coord[1] + side_length,
-#         center_coord[2] - side_length: center_coord[2] + side_length
-#     ]
-#     mask = mask[
-#         center_coord[0] - side_length: center_coord[0] + side_length,
-#         center_coord[1] - side_length: center_coord[1] + side_length,
-#         center_coord[2] - side_length: center_coord[2] + side_length
-#     ]
-
-#     alt_img_ds[i] = img
-#     alt_mask_ds[i] = mask
-#     f_alt.flush()
-#     t2 = time.time()
-#     print('{}/172 {} {}'.format(i+1, id, t2-t1))
-
-# f_alt.create_dataset('patient_id', data=alt_id_list)
-
-f_neu = h5py.File('../data/segmentation/neu.hdf5', 'w')
-
-f_neu.create_dataset('img', shape=(143, 64, 64, 64), chunks=(1, 64, 64, 64), dtype='float32')
-neu_img_ds = f_neu['img']
-f_neu.create_dataset('mask', shape=(143, 64, 64, 64), chunks=(1, 64, 64, 64), dtype='float32')
-neu_mask_ds = f_neu['mask']
-
-neu_path_list = glob.glob('../data/segmentation/neu/*')
-neu_id_list = []
-for i, path in enumerate(neu_path_list):
-    t1 = time.time()
-    id = os.path.split(path)[-1][:7]
-    neu_id_list.append(id)
-
-    file = h5py.File('../data/segmentation/neu/{}.hdf5'.format(id), 'r')
-    img = np.array(file['img'][:])
-    mask = np.array(file['mask'][:])
-    # file.close()
-
-    center_coord = file.attrs['center_coords']
-    center_coord = center_coord.astype(int)
-    side_length = 64 // 2
-    img = img[
-        center_coord[0] - side_length: center_coord[0] + side_length,
-        center_coord[1] - side_length: center_coord[1] + side_length,
-        center_coord[2] - side_length: center_coord[2] + side_length
-    ]
-    mask = mask[
-        center_coord[0] - side_length: center_coord[0] + side_length,
-        center_coord[1] - side_length: center_coord[1] + side_length,
-        center_coord[2] - side_length: center_coord[2] + side_length
-    ]
-
-    neu_img_ds[i] = img
-    neu_mask_ds[i] = mask
-    # f_neu.flush()
-    t2 = time.time()
-    print('{}/143 {} {}'.format(i+1, id, t2-t1))
-
-f_neu.create_dataset('patient_id', data=neu_id_list)
+            new_mask = old_mask[center[0]-175:center[0]+175, center[1]-150:center[1]+200, -150:]
+            x_pad, y_pad, z_pad = 350-new_mask.shape[0], 350-new_mask.shape[1], 150-new_mask.shape[2]
+            new_mask = np.pad(new_mask, ((0, x_pad), (0, y_pad), (0, z_pad)))
+            mode_group['mask'][ndx] = new_mask
+            t2 = time.time()
+            print(mode, site, img_id, ndx, '/', scan_count, t2-t1)
+        old_file.close()

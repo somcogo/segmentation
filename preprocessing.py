@@ -1,70 +1,62 @@
-import numpy as np
-import nibabel as nib
-import h5py
-from scipy import ndimage
-
 import glob
 import os
 from time import time
 
-from utils.data_loader import getCenterCoords
+import nibabel as nib
+import numpy as np
+import h5py
+from scipy import ndimage
+import torch
 
-# raw_path_list_alt = glob.glob('../altesCT_Segmentierung/*')
-# raw_path_list_alt.sort()
-# id_list_alt = [(os.path.split(path)[-1][:-14], 'altesCT') for path in raw_path_list_alt]
-# raw_path_list_neu = glob.glob('../neuesCT_Segmentierung/*')
-# raw_path_list_neu.sort()
-# id_list_neu = [(os.path.split(path)[-1][:-14], 'neuesCT') for path in raw_path_list_neu]
-# id_list = id_list_alt + id_list_neu
 
-id_list = [(4238121, 'altesCT')]
+id_list = torch.load('../data/asbach_id_data.pt')
+size_data = torch.load('../data/segmentation_size_data.pt')
+f = h5py.File('../data/segmentation_original_val_asbach.hdf5', 'a')
 
-for tuple in id_list:
-    t1 = time()
-
-    # load data
-    data = nib.load('../{}/{}.nii.gz'.format(tuple[1], tuple[0]))
-    data_mask = nib.load('../{}_Segmentierung/{}-labels.nii.gz'.format(tuple[1], tuple[0]))
-    img = data.get_fdata()
-    mask = data_mask.get_fdata()
-
-    # calculate auxiliary variables
-    zooms = data.header.get_zooms()
-    new_zooms = (0.9375, 0.9375, 0.9375)
-    new_shape = np.asarray(img.shape) * np.asarray(zooms) / np.asarray(new_zooms)
-    interpolation_zoom = np.asarray(zooms) / np.asarray(new_zooms)
-    center_coords = getCenterCoords(mask)
-    new_center_coords = center_coords * interpolation_zoom
-
-    # preprocessing
-    new_img = ndimage.zoom(img, interpolation_zoom, order=1)
-    low_perc = np.percentile(new_img, 2.5)
-    high_perc = np.percentile(new_img, 97.5)
-    if high_perc == low_perc:
-        new_img = new_img / (2 * high_perc)
+for key in ['val']:
+    if key not in f.keys():
+        group = f.create_group(key)
     else:
-        new_img = (new_img - low_perc) / (high_perc - low_perc)
-    new_mask = ndimage.zoom(mask, interpolation_zoom, order=1)
-    new_mask = new_mask > 0.1
-    new_mask = new_mask.astype(np.uint8)
+        group = f[key]
+    for site in ['asbach']:
+        if site not in group.keys():
+            site_group = group.create_group(site)
+        else:
+            site_group = group[site]
+        site_group.attrs['id_list'] = id_list[key]
+        for ndx, img_id in enumerate(id_list[key]):
+            t1 = time()
 
-    # create datasets and attributes
-    f = h5py.File('{}/{}.hdf5'.format(tuple[1][0:3],tuple[0]), 'w')
-    f.create_dataset('img', data=new_img, chunks=True)
-    f.create_dataset('mask', data=new_mask, chunks=True)
-    f.attrs['patient_id'] = tuple[0]
-    f.attrs['scanner'] = tuple[1]
-    f.attrs['mm/px'] = 0.9375
-    f.attrs['center_coords'] = new_center_coords
+            # load data
+            data = nib.load('../data/segmentation_CT/{}/{}.nii'.format(site, img_id))
+            data_mask = nib.load('../data/segmentation_CT/{}_labels/{}-labels.nii.gz'.format(site, img_id))
+            img = data.get_fdata()
+            mask = data_mask.get_fdata()
 
-    t2 = time()
-    print(tuple, t2 - t1)
+            # calculate auxiliary variables
+            zooms = data.header.get_zooms()
+            new_zooms = (1, 1, 1)
+            # new_shape = np.asarray(img.shape) * np.asarray(zooms) / np.asarray(new_zooms)
+            # new_shape = new_shape.astype(np.int32)
+            interpolation_zoom = np.asarray(zooms) / np.asarray(new_zooms)
 
-    # saving nifti
-    # print('saving nifti')
-    # nifti = nib.Nifti1Image(new_img, np.eye(4))
-    # nifti_mask = nib.Nifti1Image(new_mask, np.eye(4))
-    # nib.save(nifti, '{}.nii.gz'.format(tuple[0]))
-    # nib.save(nifti_mask, '{}_mask.nii.gz'.format(tuple[0]))
-    # print(new_center_coords)
-    # break
+            # preprocessing
+            new_img = ndimage.zoom(img, interpolation_zoom, order=1)
+            low_perc = np.percentile(new_img, 2.5)
+            high_perc = np.percentile(new_img, 97.5)
+            if high_perc == low_perc:
+                new_img = new_img / (2 * high_perc)
+            else:
+                new_img = (new_img - low_perc) / (high_perc - low_perc)
+            new_mask = ndimage.zoom(mask, interpolation_zoom, order=1)
+            new_mask = new_mask > 0.1
+            new_mask = new_mask.astype(np.uint8)
+            new_shape = new_img.shape
+
+            # create datasets and attributes
+            site_group.create_dataset(name='{}'.format(img_id), data=new_img, dtype='f')
+            site_group.create_dataset(name='{}_mask'.format(img_id), data=new_mask, dtype='i8')
+
+            t2 = time()
+            print(img_id, key, site, t2 - t1)
+f.close()
