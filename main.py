@@ -9,7 +9,6 @@ from torch.nn import DataParallel, CrossEntropyLoss
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.utils import make_grid
 
 from utils.logconf import logging
 from utils.data_loader import getDataLoaderForOverfitting, getDataLoaderv2
