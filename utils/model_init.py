@@ -1,6 +1,7 @@
 from models.swinunetr import SwinUNETR
 from models.unet import UNet
 from models.resnet50 import ResBottleneckBlock, ResNet
+from models.mednext import MedNeXt
 
 def model_init(model_type, swin_type=None, image_size=None, drop_rate=None, attn_drop_rate=None, ape=None, unet_depth=None, in_channels=1):
     if model_type == 'swinunetr':
@@ -32,9 +33,17 @@ def model_init(model_type, swin_type=None, image_size=None, drop_rate=None, attn
             model = SwinUNETR(img_size=image_size, in_chans=in_channels, patch_size=9, embed_dim=6, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24], drop_rate=drop_rate, attn_drop_rate=attn_drop_rate)
         elif swin_type == 7:
             model = SwinUNETR(img_size=image_size, in_chans=in_channels, patch_size=9, embed_dim=6, depths=[2, 2, 2], num_heads=[3, 6, 12], drop_rate=drop_rate, attn_drop_rate=attn_drop_rate)
+        elif swin_type == 'og':
+            model = SwinUNETR(img_size=image_size, in_chans=in_channels, patch_size=2, window_size=8, embed_dim=48, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24], drop_rate=drop_rate, attn_drop_rate=attn_drop_rate)
     elif model_type == 'unet':
-        model = UNet(in_channels=in_channels, n_classes=2, depth=unet_depth, wf=4, padding=True, batch_norm=True, up_mode='upsample')
+        model = UNet(in_channels=in_channels, n_classes=2, depth=unet_depth, wf=6, padding=True, batch_norm=True, up_mode='upsample')
     elif model_type == 'resnet':
         model = ResNet(3, ResBottleneckBlock, [3, 4, 6, 3], in_channels=in_channels, useBottleneck=True, outputs=2)
+    elif model_type == 'mednext-s':
+        model = MedNeXt(in_channels=1, n_channels=32, n_classes=2, exp_r=2, block_counts=[2,2,2,2,2,2,2,2,2], dim='3d')
+    elif model_type == 'mednext-t1':
+        model = MedNeXt(in_channels=1, n_channels=8, n_classes=2, exp_r=2, block_counts=[2,2,2,2,2,2,2,2,2], dim='3d')
+    elif model_type == 'mednext-t2':
+        model = MedNeXt(in_channels=1, n_channels=32, n_classes=2, exp_r=2, block_counts=[1,1,1,0,0,0,1,1,1], dim='3d')
     
     return model
