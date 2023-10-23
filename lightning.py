@@ -5,9 +5,11 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from models.swin_transformer_block import SwinTransformer
 from models.unetblocks import UNetConvBlock, UNetUpBlock
 from models.swinunetr import SwinUNETR
-from utils.data_loader import getDataLoader
+from utils.data_loader import getDataLoader, getDataLoaderHDF5
 
 import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 class SwinUNETRModule(pl.LightningModule):
 	def __init__(self,
@@ -31,6 +33,8 @@ class SwinUNETRModule(pl.LightningModule):
 			num_heads=num_heads,
 		)
 
+		self.head = nn.Conv3d(in_channels=embed_dim, out_channels=2, kernel_size=1)
+
 	def configure_optimizers(self):
 		optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
 		return optimizer
@@ -41,7 +45,7 @@ class SwinUNETRModule(pl.LightningModule):
 		out = self.head(features)
 		loss_fn = nn.CrossEntropyLoss(reduction='sum')
 		y = y.long()
-		loss = loss_fn(out, y.squeeze())
+		loss = loss_fn(out, y.squeeze(dim=1))
 		return loss
 
 	def validation_step(self, val_batch, batch_idx):
@@ -50,25 +54,32 @@ class SwinUNETRModule(pl.LightningModule):
 		out = self.head(features)
 		loss_fn = nn.CrossEntropyLoss(reduction='sum')
 		y = y.long()
-		loss = loss_fn(out.view(16, 2, -1), y.view(16, -1))
-		self.log('val_loss', loss)
+		loss = loss_fn(out, y.squeeze(dim=1))
+		self.log('val_loss', loss, sync_dist=True)
 
 # data
-train_loader = getDataLoader(16)
-val_loader = getDataLoader(16)
+image_size = 64
+train_loader, val_loader = getDataLoaderHDF5(
+	batch_size=16,
+	image_size=image_size,
+	num_workers=64,
+	persistent_workers=True)
 
 # model
-model = SwinUNETRModule(img_size=64, patch_size=2, embed_dim=24, depths=[2, 2, 2], num_heads=[3, 6, 12])
+model = SwinUNETRModule(img_size=image_size, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6])
 
 # logger
-logger = TensorBoardLogger(save_dir=os.getcwd(), version=1, name="lightning_logs")
+logger = TensorBoardLogger(save_dir=os.getcwd(), version=3, name="lightning_logs")
 
 # training
 trainer = pl.Trainer(
+	strategy='ddp',
 	accelerator='gpu',
-	max_epochs=100,
-	limit_train_batches=0.5,
-	logger=logger
+	max_epochs=2,
+	limit_train_batches=1.0,
+	logger=logger,
+	log_every_n_steps=10
 	)
-trainer.fit(model, train_loader, val_loader)
-    
+
+if __name__ == '__main__':
+    trainer.fit(model, train_loader, val_loader)
