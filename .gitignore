@@ -24,3 +24,9 @@ utils/__pycache__/__init__.cpython-39.pyc
 lightning_logs
 .gitignore
 dummy.py
+presentation
+saved_metrics
+saved_models
+__pycache__
+notebook.ipynb
+run_everything.py
