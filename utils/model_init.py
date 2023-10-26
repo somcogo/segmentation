@@ -1,9 +1,12 @@
+from monai.networks.nets import SwinUNETR as MonaiSwin
+
+import torch
 from models.swinunetr import SwinUNETR
 from models.unet import UNet
 from models.resnet50 import ResBottleneckBlock, ResNet
 from models.mednext import MedNeXt
 
-def model_init(model_type, swin_type=None, image_size=None, drop_rate=None, attn_drop_rate=None, ape=None, unet_depth=None, in_channels=1):
+def model_init(model_type, swin_type=None, image_size=None, drop_rate=None, attn_drop_rate=None, ape=None, unet_depth=None, in_channels=1, pretrained=True):
     if model_type == 'swinunetr':
         if swin_type == 1:
             model = SwinUNETR(img_size=image_size, in_chans=in_channels, patch_size=2, embed_dim=12, depths=[2, 2], num_heads=[3, 6], ape=ape)
@@ -35,6 +38,11 @@ def model_init(model_type, swin_type=None, image_size=None, drop_rate=None, attn
             model = SwinUNETR(img_size=image_size, in_chans=in_channels, patch_size=9, embed_dim=6, depths=[2, 2, 2], num_heads=[3, 6, 12], drop_rate=drop_rate, attn_drop_rate=attn_drop_rate)
         elif swin_type == 'og':
             model = SwinUNETR(img_size=image_size, in_chans=in_channels, patch_size=2, window_size=8, embed_dim=48, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24], drop_rate=drop_rate, attn_drop_rate=attn_drop_rate)
+    elif model_type == 'monaiswin':
+        model = MonaiSwin(img_size=image_size, in_channels=in_channels, out_channels=2, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24], feature_size=48, spatial_dims=3)
+        if pretrained:
+            swin_weights = torch.load('data/model_swinvit.pt')
+            model.load_from(swin_weights)
     elif model_type == 'unet':
         model = UNet(in_channels=in_channels, n_classes=2, depth=unet_depth, wf=6, padding=True, batch_norm=True, up_mode='upsample')
     elif model_type == 'resnet':

@@ -1,6 +1,6 @@
 import torch
 
-def draw_segmenation_mask(img, masks, colors, device, alpha=0.7):
+def draw_segmenation_mask(img, masks, colors, device, alpha=0.3):
     rgb_masks = torch.concat([masks.unsqueeze(1), masks.unsqueeze(1), masks.unsqueeze(1)], dim=1)
     colors = colors.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
     rgb_masks = colors * rgb_masks

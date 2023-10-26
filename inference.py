@@ -1,11 +1,14 @@
 import torch
 from models.swinunetr import SwinUNETR
 
-def inference(img:torch.Tensor, model, section_size):
+def inference(img:torch.Tensor, model, section_size, device):
+    model = model.to(device)
+    model.eval()
+    img = img.to(device)
     H, W, D = img.shape[-3:]
-    pred = torch.zeros((1, 2, H, W, D), device='cuda:0')
-    prob = torch.zeros((1, H, W, D), device='cuda:0')
-    prob2 = torch.zeros((1, 2, H, W, D), device='cuda:0')
+    pred = torch.zeros((1, 2, H, W, D), device=device)
+    # prob = torch.zeros((1, H, W, D), device=device)
+    # prob2 = torch.zeros((1, 2, H, W, D), device=device)
     model.eval()
     x, y, z = section_size
     x_coords = list(range(0, H-x, x // 2))
@@ -17,15 +20,17 @@ def inference(img:torch.Tensor, model, section_size):
     for x_c in x_coords:
         for y_c in y_coords:
             for z_c in z_coords:
+                print(x_c, y_c, z_c)
                 patch = img[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z]
-                temp1, temp2 = model(patch)
-                pred[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp1
-                prob2[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp2
-                temp_prob = temp2.argmax(dim=1)
+                temp1 = model(patch)
+                pred[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp1.detach()
+                del temp1
+                # prob2[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp2
+                # temp_prob = temp2.argmax(dim=1)
                 # if temp_prob.max() > 0:
                 #     print(x_c, y_c, z_c)
-                prob[:, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp_prob
+                # prob[:, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp_prob
 
     pred_class = pred.argmax(dim=1)
 
-    return pred_class, pred, prob, prob2
+    return pred_class, pred, torch.nn.functional.softmax(pred, dim=1)
