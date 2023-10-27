@@ -16,4 +16,5 @@ run_everything.py
 notebook.ipynb
 presentation
 saved_metrics
+server_runs
 .vscode
