@@ -1,8 +1,14 @@
 import torch
 
 def draw_segmenation_mask(img, masks, colors, device, alpha=0.3):
+    img = torch.tensor(img.copy()).unsqueeze(0)
+    img = torch.concat([img, img, img], dim=0)
+    img = (img - img.min()) / (img.max() - img.min()) * 255
+    img = img.to(dtype=torch.uint8)
+    masks = torch.tensor(masks.copy()) > 0
+
     rgb_masks = torch.concat([masks.unsqueeze(1), masks.unsqueeze(1), masks.unsqueeze(1)], dim=1)
-    colors = colors.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    colors = torch.tensor(colors).expand(rgb_masks.shape)
     rgb_masks = colors * rgb_masks
 
     coeffs = torch.zeros(rgb_masks.shape, device=device)
