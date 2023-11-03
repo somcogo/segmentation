@@ -29,10 +29,9 @@ class SegmentationDataset(Dataset):
         #     x2, y2, z2 = x1 + 128, y1 + 128, z1 + 128
         # elif self.section == 'whole':
         #     x1, x2, y1, y2, z1, z2 = 0, 350, 0, 350, 0, 150
-        image = np.array(self.img_ds)
-        mask = np.array(self.mask_ds)
-        if self.aug:
-            image, mask = crop_section_and_aug(image, mask, self.section, self.image_size)
+        image = np.array(self.img_ds[index])
+        mask = np.array(self.mask_ds[index])
+        image, mask = crop_section_and_aug(image, mask, self.section, self.image_size, aug=self.aug)
         return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0)
 
 class SwarmSegmentationDataset(Dataset):
@@ -72,15 +71,15 @@ class SwarmSegmentationDataset(Dataset):
         return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0)
 
 def getSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64)):
-    trn_ds = SegmentationDataset(data_path='../../data', mode='trn', aug=aug, section=section, image_size=image_size)
-    val_ds = SegmentationDataset(data_path='../../data', mode='val', aug=False, section=section, image_size=image_size)
+    trn_ds = SegmentationDataset(data_path='../data', mode='trn', aug=aug, section=section, image_size=image_size)
+    val_ds = SegmentationDataset(data_path='../data', mode='val', aug=False, section=section, image_size=image_size)
     trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=8)
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8)
     return trn_dl, val_dl
 
 def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random'):
-    trn_ds_list = [SwarmSegmentationDataset('../../data', 'trn', site, aug, section) for site in ['alt', 'neu', 'asbach']]
-    val_ds_list = [SwarmSegmentationDataset('../../data', 'val', site, False, section) for site in ['alt', 'neu', 'asbach']]
+    trn_ds_list = [SwarmSegmentationDataset('../data', 'trn', site, aug, section) for site in ['alt', 'neu', 'asbach']]
+    val_ds_list = [SwarmSegmentationDataset('../data', 'val', site, False, section) for site in ['alt', 'neu', 'asbach']]
     trn_dl_list = [DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=8) for trn_ds in trn_ds_list]
     val_dl_list = [DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8) for val_ds in val_ds_list]
     return trn_dl_list, val_dl_list

@@ -23,7 +23,6 @@ def inference(img:torch.Tensor, model, section_size, device):
     for x_c in x_coords:
         for y_c in y_coords:
             for z_c in z_coords:
-                print(x_c, y_c, z_c)
                 patch = img[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z]
                 temp1 = model(patch)
                 pred[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp1.detach()
@@ -39,22 +38,27 @@ def inference(img:torch.Tensor, model, section_size, device):
     return pred_class, pred, torch.nn.functional.softmax(pred, dim=1)
 
 def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=False):
-    inf_file = h5py.File('../../data/segmentation.hdf5')
+    inf_file = h5py.File('../data/segmentation.hdf5')
     img_ds = inf_file['val']['img']
     mask_ds = inf_file['val']['mask']
 
     dice_scores = np.zeros((img_ds.shape[0]))
     if keep_masks:
-        pred_class_stack = np.zeros((img_ds.shape))
-        pred_stack = np.zeros(([*img_ds.shape].insert(1, 2)))
-        prob_stack = np.zeros(([*img_ds.shape].insert(1, 2)))
+        shape = [*img_ds.shape]
+        pred_class_stack = np.zeros(shape)
+        shape.insert(1, 2)
+        pred_stack = np.zeros(shape)
+        prob_stack = np.zeros(shape)
     for img_index in range(img_ds.shape[0]):
-        img = torch.from_numpy(np.array(img_ds[img_index]))
-        mask = torch.from_numpy(np.array(mask_ds[img_index]))
+        img = torch.from_numpy(np.array(img_ds[img_index])).unsqueeze(0).unsqueeze(0)
+        mask = torch.from_numpy(np.array(mask_ds[img_index])).unsqueeze(0)
         pred_class, pred, prob = inference(img, model, section_size, device)
+        pred_class = pred_class.detach().cpu()
+        pred = pred.detach().cpu()
+        prob = prob.detach().cpu()
 
         intersect = (pred_class * mask).sum(axis=(1, 2, 3))
-        dice_scores[img_index] = intersect/(pred_class.sum(axis=(1, 2, 3)) + mask.sum(axis=(1, 2, 3)))
+        dice_scores[img_index] = 2*intersect/(pred_class.sum(axis=(1, 2, 3)) + mask.sum(axis=(1, 2, 3)))
 
         if keep_masks:
             pred_class_stack[img_index] = pred_class
