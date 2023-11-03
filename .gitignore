@@ -4,7 +4,6 @@ lightning_logs/
 models/__pycache__/
 utils/__pycache__/
 lightning_logs
-.gitignore
 dummy.py
 __pycache__/
 saved_models/
@@ -16,3 +15,4 @@ run_everything.py
 notebook.ipynb
 presentation
 saved_metrics
+execute_script.py

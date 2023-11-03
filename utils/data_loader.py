@@ -62,8 +62,8 @@ class SegmentationDatasetTest(Dataset):
         return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0)
 
 def getSegmentationDataLoader(batch_size, aug=True, section='random'):
-    trn_ds = SegmentationDataset(data_path='../../data', mode='trn', aug=aug, section=section)
-    val_ds = SegmentationDataset(data_path='../../data', mode='val', aug=False, section=section)
+    trn_ds = SegmentationDataset(data_path='data', mode='trn', aug=aug, section=section)
+    val_ds = SegmentationDataset(data_path='data', mode='val', aug=False, section=section)
     trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=8)
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8)
     return trn_dl, val_dl
@@ -91,8 +91,8 @@ class DatasetV2(Dataset):
         return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0), img_id
     
 def getNewDataLoader(batch_size, persistent_workers=True, aug=True):
-    trn_ds = NewDataset(data_path='data', mode='trn', aug=aug)
-    val_ds = NewDataset(data_path='data', mode='val', aug=False)
+    trn_ds = DatasetV2(data_path='data', mode='trn', aug=aug)
+    val_ds = DatasetV2(data_path='data', mode='val', aug=False)
     trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8, persistent_workers=persistent_workers)
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=8, persistent_workers=persistent_workers)
     return trn_dl, val_dl

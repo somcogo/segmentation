@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.tensorboard import SummaryWriter
 
 from utils.logconf import logging
-from utils.data_loader import getDataLoaderv2, getSegmentationDataLoader
+from utils.data_loader import getSegmentationDataLoader
 from utils.model_init import model_init
 from utils.segmentation_mask import draw_segmenation_mask
 from utils.scheduler import get_cosine_lr_with_linear_warmup
