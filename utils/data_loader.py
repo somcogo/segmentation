@@ -29,10 +29,9 @@ class SegmentationDataset(Dataset):
         #     x2, y2, z2 = x1 + 128, y1 + 128, z1 + 128
         # elif self.section == 'whole':
         #     x1, x2, y1, y2, z1, z2 = 0, 350, 0, 350, 0, 150
-        image = np.array(self.img_ds)
-        mask = np.array(self.mask_ds)
-        if self.aug:
-            image, mask = crop_section_and_aug(image, mask, self.section, self.image_size)
+        image = np.array(self.img_ds[index])
+        mask = np.array(self.mask_ds[index])
+        image, mask = crop_section_and_aug(image, mask, self.section, self.image_size, aug=self.aug)
         return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0)
 
 class SwarmSegmentationDataset(Dataset):

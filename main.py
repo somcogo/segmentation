@@ -123,8 +123,8 @@ class SegmentationTrainingApp:
 
     def initDl(self):
         if self.swarm_traning:
-            return getSwarmSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section)
-        return getSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section)
+            return getSwarmSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size)
+        return getSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size)
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
