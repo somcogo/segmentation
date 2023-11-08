@@ -81,7 +81,7 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
     prob_stack = np.zeros(shape)
     for img_index in range(img_ds.shape[0]):
         img = torch.from_numpy(np.array(img_ds[img_index])).unsqueeze(0).unsqueeze(0)
-        mask = torch.from_numpy(np.array(mask_ds[img_index])).unsqueeze(0)
+        mask = np.expand_dims(np.array(mask_ds[img_index]), axis=0)
         pred_class, pred, prob = inference(img, model, section_size, device)
         pred_class = pred_class.detach().cpu()
         pred = pred.detach().cpu()
