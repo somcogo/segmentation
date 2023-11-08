@@ -3,8 +3,6 @@ import h5py
 import numpy as np
 from scipy import ndimage
 
-from models.swinunetr import SwinUNETR
-
 def calculate_dice(pred, mask):
     intersection = (pred * mask).sum(axis=(-3,-2,-1))
     dice = (2*intersection)/(pred.sum(axis=(-3,-2,-1)) + mask.sum(axis=(-3,-2,-1)))
@@ -69,34 +67,35 @@ def inference(img:torch.Tensor, model, section_size, device):
 
     return pred_class, pred, torch.nn.functional.softmax(pred, dim=1)
 
-def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=False):
-    inf_file = h5py.File('../data/segmentation.hdf5')
+def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=False, img_number=None):
+    inf_file = h5py.File('data/segmentation.hdf5')
     img_ds = inf_file['val']['img']
     mask_ds = inf_file['val']['mask']
+    if img_number is None:
+        img_number = img_ds.shape[0]
 
     shape = [*img_ds.shape]
     pred_class_stack = np.zeros(shape)
     shape.insert(1, 2)
     pred_stack = np.zeros(shape)
     prob_stack = np.zeros(shape)
-    for img_index in range(img_ds.shape[0]):
+    for img_index in range(img_number):
         img = torch.from_numpy(np.array(img_ds[img_index])).unsqueeze(0).unsqueeze(0)
-        mask = np.expand_dims(np.array(mask_ds[img_index]), axis=0)
         pred_class, pred, prob = inference(img, model, section_size, device)
         pred_class = pred_class.detach().cpu()
         pred = pred.detach().cpu()
         prob = prob.detach().cpu()
 
-        if keep_masks:
-            pred_class_stack[img_index] = pred_class
-            pred_stack[img_index] = pred
-            prob_stack[img_index] = prob
+        pred_class_stack[img_index] = pred_class
+        pred_stack[img_index] = pred
+        prob_stack[img_index] = prob
         
         if log:
             print(img_index)
 
+    mask = np.array(mask_ds[img_index])
     comp_size_per_img, postprocessed, comp_sizes, postprocessed2, comp_sizes2, postprocessed3, comp_sizes3 = postprocess(pred_class_stack, pred_stack, prob_stack)
-    dice0 = calculate_dice(pred_class, mask)
+    dice0 = calculate_dice(pred_class_stack, mask)
     dice1 = calculate_dice(postprocessed, mask)
     dice2 = calculate_dice(postprocessed2, mask)
     dice3 = calculate_dice(postprocessed3, mask)
