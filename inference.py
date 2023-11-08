@@ -1,8 +1,40 @@
 import torch
 import h5py
 import numpy as np
+from scipy import ndimage
 
 from models.swinunetr import SwinUNETR
+
+def calculate_dice(pred, mask):
+    intersection = (pred == mask).sum(axis=(-3,-2,-1))
+    dice = (2*intersection)/(pred.sum(axis=(-3,-2,-1)) + mask.sum(axis=(-3,-2,-1)))
+    return dice
+
+def postprocess(pred_class_stack, pred_stack, prob_stack):
+    comp_per_img = np.zeros((72))
+    comp_size_per_img = []
+    postprocessed = np.zeros((72, 350, 350, 150))
+    postprocessed2 = np.zeros((72, 350, 350, 150))
+    postprocessed3 = np.zeros((72, 350, 350, 150))
+    for img_ndx, pred_im in enumerate(pred_class_stack):
+        labelled_components, num_components = ndimage.label(pred_im)
+        comp_per_img[img_ndx] = num_components
+        comp_sizes = np.zeros((num_components+1))
+        comp_sizes2 = np.zeros((num_components+1))
+        comp_sizes3 = np.zeros((num_components+1))
+        for comp in range(1, num_components+1):
+            comp_sizes[comp] = (labelled_components == comp).sum()
+            comp_sizes2[comp] = pred_stack[img_ndx,1][labelled_components == comp].sum()
+            comp_sizes3[comp] = prob_stack[img_ndx,1][labelled_components == comp].sum()
+        comp_size_per_img.append(comp_sizes)
+        largest_comp = comp_sizes.argmax()
+        largest_comp2 = comp_sizes2.argmax()
+        largest_comp3 = comp_sizes3.argmax()
+        postprocessed[img_ndx] = labelled_components == largest_comp
+        postprocessed2[img_ndx] = labelled_components == largest_comp2
+        postprocessed3[img_ndx] = labelled_components == largest_comp3
+
+    return comp_size_per_img, postprocessed, comp_sizes, postprocessed2, comp_sizes2, postprocessed3, comp_sizes3
 
 def inference(img:torch.Tensor, model, section_size, device):
     model = model.to(device)
@@ -42,13 +74,11 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
     img_ds = inf_file['val']['img']
     mask_ds = inf_file['val']['mask']
 
-    dice_scores = np.zeros((img_ds.shape[0]))
-    if keep_masks:
-        shape = [*img_ds.shape]
-        pred_class_stack = np.zeros(shape)
-        shape.insert(1, 2)
-        pred_stack = np.zeros(shape)
-        prob_stack = np.zeros(shape)
+    shape = [*img_ds.shape]
+    pred_class_stack = np.zeros(shape)
+    shape.insert(1, 2)
+    pred_stack = np.zeros(shape)
+    prob_stack = np.zeros(shape)
     for img_index in range(img_ds.shape[0]):
         img = torch.from_numpy(np.array(img_ds[img_index])).unsqueeze(0).unsqueeze(0)
         mask = torch.from_numpy(np.array(mask_ds[img_index])).unsqueeze(0)
@@ -56,9 +86,6 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
         pred_class = pred_class.detach().cpu()
         pred = pred.detach().cpu()
         prob = prob.detach().cpu()
-
-        intersect = (pred_class * mask).sum(axis=(1, 2, 3))
-        dice_scores[img_index] = 2*intersect/(pred_class.sum(axis=(1, 2, 3)) + mask.sum(axis=(1, 2, 3)))
 
         if keep_masks:
             pred_class_stack[img_index] = pred_class
@@ -68,7 +95,13 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
         if log:
             print(img_index)
 
+    comp_size_per_img, postprocessed, comp_sizes, postprocessed2, comp_sizes2, postprocessed3, comp_sizes3 = postprocess(pred_class_stack, pred_stack, prob_stack)
+    dice0 = calculate_dice(pred_class, mask)
+    dice1 = calculate_dice(postprocessed, mask)
+    dice2 = calculate_dice(postprocessed2, mask)
+    dice3 = calculate_dice(postprocessed3, mask)
+
     if keep_masks:
-        return dice_scores, pred_class_stack, pred_stack, prob_stack
+        return dice0, dice1, dice2, dice3, comp_size_per_img, postprocessed, comp_sizes, postprocessed2, comp_sizes2, postprocessed3, comp_sizes3, pred_class_stack, pred_stack, prob_stack
     else:
-        return dice_scores
+        return dice0, dice1, dice2, dice3, comp_size_per_img, postprocessed, comp_sizes, postprocessed2, comp_sizes2, postprocessed3, comp_sizes3
