@@ -6,7 +6,7 @@ from scipy import ndimage
 from models.swinunetr import SwinUNETR
 
 def calculate_dice(pred, mask):
-    intersection = (pred == mask).sum(axis=(-3,-2,-1))
+    intersection = (pred * mask).sum(axis=(-3,-2,-1))
     dice = (2*intersection)/(pred.sum(axis=(-3,-2,-1)) + mask.sum(axis=(-3,-2,-1)))
     return dice
 
