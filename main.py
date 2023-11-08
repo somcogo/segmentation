@@ -4,20 +4,21 @@ import shutil
 import copy
 import math
 
+import numpy as np
 import torch
 from torch.nn import DataParallel, CrossEntropyLoss
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.tensorboard import SummaryWriter
 
-from utils.logconf import logging
+from utils.logconf import logging, my_logger
 from utils.data_loader import getSegmentationDataLoader, getSwarmSegmentationDataLoader
 from utils.model_init import model_init
 from utils.segmentation_mask import draw_segmenation_mask
 from utils.scheduler import get_cosine_lr_with_linear_warmup
 from utils.merge_strategies import get_layer_list
 
-log = logging.getLogger(__name__)
+log = my_logger
 # log.setLevel(logging.WARN)
 log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
@@ -312,10 +313,9 @@ class SegmentationTrainingApp:
         metrics[3:12, start_ndx:end_ndx] = self.computeMetrics(pred_label, masks)
 
         if need_imgs:
-            combined_masks = torch.concat([masks[0], pred_label[0]], dim=0)
-            rgb_img = torch.concat([batch[0], batch[0], batch[0]], dim=0)
-            rgb_img = 255*(rgb_img - rgb_img.min())/(rgb_img.max()- rgb_img.min())
-            segmentation_mask = draw_segmenation_mask(rgb_img, combined_masks, torch.tensor([[255, 0, 0], [0, 255, 0]], device=self.device), device=self.device, alpha=0.3)
+            combined_masks = torch.concat([masks[0], pred_label[0]], dim=0).detach().cpu().numpy()
+            img_cpu = batch[0].squeeze().detach().cpu().numpy()
+            segmentation_mask = draw_segmenation_mask(img_cpu, combined_masks, np.array([[255, 0, 0], [0, 255, 0]]), alpha=0.3)
 
             x, y, z = torch.where(masks[0])[-3:] if masks[0].sum() > 0 else torch.tensor(self.image_size)//2
             x, y, z, = x.float().mean().int(), y.float().mean().int(), z.float().mean().int()
@@ -401,67 +401,51 @@ class SegmentationTrainingApp:
                 model.load_state_dict(param_dict, strict=False)
 
     def saveModel(self, type_str, epoch_ndx, val_metrics, isBest=False):
-        model_file_path = os.path.join(
-            'saved_models',
-            self.logdir_name,
-            '{}_{}_{}.{}.state'.format(
-                type_str,
-                self.time_str,
-                self.comment,
-                epoch_ndx
-            )
-        )
-        os.makedirs(os.path.dirname(model_file_path), mode=0o755, exist_ok=True)
-        data_file_path = os.path.join(
-            'saved_metrics',
-            self.logdir_name,
-            '{}_{}_{}.{}.pt'.format(
-                type_str,
-                self.time_str,
-                self.comment,
-                epoch_ndx
-            )
-        )
-        os.makedirs(os.path.dirname(data_file_path), mode=0o755, exist_ok=True)
-
-        model = self.model
-        if isinstance(model, DataParallel):
-            model = model.module
-
-        model_state = {
-            'model_state': model.state_dict(),
-            'model_name': type(model).__name__,
-            'optimizer_state': self.optimizer.state_dict(),
-            'optimizer_name': type(self.optimizer).__name__,
-            'scheduler_state': self.scheduler.state_dict(),
-            'scheduler_name': type(self.scheduler).__name__,
-            'epoch': epoch_ndx,
-        }
-        data_state = {
-            'epoch': epoch_ndx,
-            'totalTrainingSamples_count': self.totalTrainingSamples_count,
-            'valmetrics':val_metrics.detach().cpu()
-        }
-
-        torch.save(model_state, model_file_path)
-        torch.save(data_state, data_file_path)
-
-        # log.debug("Saved model params to {}".format(file_path))
-
         if isBest:
-            best_path = os.path.join(
+            model_file_path = os.path.join(
                 'saved_models',
                 self.logdir_name,
-                '{}_{}_{}.{}.state'.format(
+                '{}_{}_{}.state'.format(
+                    type_str,
+                    self.time_str,
+                    self.comment
+                )
+            )
+            os.makedirs(os.path.dirname(model_file_path), mode=0o755, exist_ok=True)
+            data_file_path = os.path.join(
+                'saved_metrics',
+                self.logdir_name,
+                '{}_{}_{}.pt'.format(
                     type_str,
                     self.time_str,
                     self.comment,
-                    'best'
                 )
             )
-            shutil.copyfile(model_file_path, best_path)
+            os.makedirs(os.path.dirname(data_file_path), mode=0o755, exist_ok=True)
 
-            # log.debug("Saved model params to {}".format(best_path))
+            model = self.model
+            if isinstance(model, DataParallel):
+                model = model.module
+
+            model_state = {
+                'model_state': model.state_dict(),
+                'model_name': type(model).__name__,
+                'optimizer_state': self.optimizer.state_dict(),
+                'optimizer_name': type(self.optimizer).__name__,
+                'scheduler_state': self.scheduler.state_dict(),
+                'scheduler_name': type(self.scheduler).__name__,
+                'epoch': epoch_ndx,
+            }
+            data_state = {
+                'epoch': epoch_ndx,
+                'totalTrainingSamples_count': self.totalTrainingSamples_count,
+                'valmetrics':val_metrics.detach().cpu()
+            }
+
+            torch.save(model_state, model_file_path)
+            torch.save(data_state, data_file_path)
+
+            # log.debug("Saved model params to {}".format(file_path))
 
 if __name__ == '__main__':
     SegmentationTrainingApp().main()

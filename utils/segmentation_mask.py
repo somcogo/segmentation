@@ -3,12 +3,12 @@ from matplotlib import pyplot as plt
 from matplotlib import animation
 from IPython.display import HTML
 
+plt.set_loglevel("NOTSET") 
+
 def draw_segmenation_mask(img:np.ndarray,    # shape (H, W, D)
                           masks:np.ndarray,  # shape (n, H, W, D)
                           colors:np.ndarray, # shape (n, 3)
                           alpha=0.3):
-    H, W, D = img.shape
-    n, _ = colors.shape
     img = np.expand_dims(img, axis=0)
     img = np.concatenate([img, img, img], axis=0)
     img = (img - img.min()) / (img.max() - img.min()) * 255
@@ -26,7 +26,7 @@ def draw_segmenation_mask(img:np.ndarray,    # shape (H, W, D)
     pos_mask = rgb_masks > 0
     coeffs[pos_mask] = (1 - alpha) * rgb_masks[pos_mask] / rgb_masks_sum[pos_mask]
     rgb_masks = rgb_masks * coeffs
-    weighted_masks = rgb_masks.sum(dim=0)
+    weighted_masks = rgb_masks.sum(axis=0)
 
     sum_mask = weighted_masks > 0
     img[sum_mask] = img[sum_mask]*alpha + weighted_masks[sum_mask]

@@ -4,7 +4,6 @@ lightning_logs/
 models/__pycache__/
 utils/__pycache__/
 lightning_logs
-.gitignore
 dummy.py
 __pycache__/
 saved_models/
@@ -18,3 +17,4 @@ presentation
 saved_metrics
 server_runs
 .vscode
+execute_script.py

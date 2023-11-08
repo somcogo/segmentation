@@ -71,15 +71,15 @@ class SwarmSegmentationDataset(Dataset):
         return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0)
 
 def getSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64)):
-    trn_ds = SegmentationDataset(data_path='../data', mode='trn', aug=aug, section=section, image_size=image_size)
-    val_ds = SegmentationDataset(data_path='../data', mode='val', aug=False, section=section, image_size=image_size)
+    trn_ds = SegmentationDataset(data_path='data', mode='trn', aug=aug, section=section, image_size=image_size)
+    val_ds = SegmentationDataset(data_path='data', mode='val', aug=False, section=section, image_size=image_size)
     trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=8)
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8)
     return trn_dl, val_dl
 
 def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random'):
-    trn_ds_list = [SwarmSegmentationDataset('../data', 'trn', site, aug, section) for site in ['alt', 'neu', 'asbach']]
-    val_ds_list = [SwarmSegmentationDataset('../data', 'val', site, False, section) for site in ['alt', 'neu', 'asbach']]
+    trn_ds_list = [SwarmSegmentationDataset('data', 'trn', site, aug, section) for site in ['alt', 'neu', 'asbach']]
+    val_ds_list = [SwarmSegmentationDataset('data', 'val', site, False, section) for site in ['alt', 'neu', 'asbach']]
     trn_dl_list = [DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=8) for trn_ds in trn_ds_list]
     val_dl_list = [DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8) for val_ds in val_ds_list]
     return trn_dl_list, val_dl_list
