@@ -36,7 +36,7 @@ def create_animation(img_to_animate):
     fig = plt.figure()
     ims = []
     for image in range(0,img_to_animate.shape[-1]):
-        im = plt.imshow(img_to_animate[:,:,:,-image-1].permute(1, 2, 0), 
+        im = plt.imshow(np.transpose(img_to_animate[:,:,:,-image-1], (1, 2, 0)), 
                         animated=True)
         plt.axis("off")
         ims.append([im])
@@ -44,8 +44,7 @@ def create_animation(img_to_animate):
                                     repeat_delay=1000)
     plt.close()
     html = HTML(ani.to_jshtml())
-    html
-    return
+    return html
 
 def animate_seg_mask(img:np.ndarray, masks:np.ndarray, colors:np.ndarray, alpha=0.3):
     img_to_animate = draw_segmenation_mask(img, masks, colors, alpha)
