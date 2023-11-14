@@ -57,9 +57,9 @@ def postprocess_single_img(pred_class, pred, prob):
             postprocessed2 = labelled_components == largest_comp2
             postprocessed3 = labelled_components == largest_comp3
 
-        return num_components, comp_sizes, postprocessed, postprocessed2, postprocessed3
+        return num_components, postprocessed, postprocessed2, postprocessed3
 
-
+# From nnUNet github implementation TODO: don't forget to cite
 @lru_cache(maxsize=2)
 def compute_gaussian(tile_size, sigma_scale: float = 1. / 8,
                      value_scaling_factor: float = 1, dtype=torch.float16, device='cuda:0') \
