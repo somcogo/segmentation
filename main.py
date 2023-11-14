@@ -31,7 +31,7 @@ class SegmentationTrainingApp:
                  swin_type=1, aug=False, drop_rate=0, attn_drop_rate=0,
                  image_size=64, in_channels=1, T_0=2000, section='large',
                  unet_depth=None, pretrained=True, swarm_training=False,
-                 model_path=None):
+                 model_path=None, grad_accumulation=1, foreground_pref_chance=0.):
         
         self.settings = copy.deepcopy(locals())
         del self.settings['self']
@@ -50,6 +50,8 @@ class SegmentationTrainingApp:
             self.image_size = image_size
         self.section = section
         self.swarm_traning = swarm_training
+        self.grad_accumulation = grad_accumulation
+        self.foreground_pred_chance = foreground_pref_chance
 
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
@@ -186,7 +188,6 @@ class SegmentationTrainingApp:
         trnMetrics = torch.zeros(14, len(train_dl.dataset), device=self.device)
 
         for batch_ndx, batch_tuple in enumerate(train_dl):
-            self.optimizer.zero_grad()
             loss, _, _ = self.computeBatchLoss(
                 self.model,
                 batch_ndx,
@@ -195,7 +196,9 @@ class SegmentationTrainingApp:
                 trnMetrics)
 
             loss.backward()
-            self.optimizer.step()
+            if (batch_ndx + 1) % self.grad_accumulation == 0 or (batch_ndx + 1) == len(train_dl):
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
         self.totalTrainingSamples_count += len(train_dl.dataset)
 

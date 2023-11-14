@@ -8,7 +8,7 @@ import torch
 from utils.ops import crop_section_and_aug
 
 class SegmentationDataset(Dataset):
-    def __init__(self, data_path, mode, aug=False, section='random', image_size=None):
+    def __init__(self, data_path, mode, aug=False, section='random', image_size=None, foreground_pref_chance=0.):
         super().__init__()
         file = h5py.File(os.path.join(data_path, 'segmentation.hdf5'), 'r')
         self.img_ds = file[mode]['img']
@@ -16,6 +16,7 @@ class SegmentationDataset(Dataset):
         self.aug = aug
         self.section = section
         self.image_size = image_size
+        self.foreground_pref_chance = foreground_pref_chance
 
     def __len__(self):
         return self.img_ds.shape[0]
@@ -31,7 +32,7 @@ class SegmentationDataset(Dataset):
         #     x1, x2, y1, y2, z1, z2 = 0, 350, 0, 350, 0, 150
         image = np.array(self.img_ds[index])
         mask = np.array(self.mask_ds[index])
-        image, mask = crop_section_and_aug(image, mask, self.section, self.image_size, aug=self.aug)
+        image, mask = crop_section_and_aug(image, mask, self.section, self.image_size, aug=self.aug, foreground_pref_chance=self.foreground_pref_chance)
         return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0)
 
 class SwarmSegmentationDataset(Dataset):
@@ -70,9 +71,9 @@ class SwarmSegmentationDataset(Dataset):
             image, mask = crop_section_and_aug(image, mask)
         return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0)
 
-def getSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64)):
-    trn_ds = SegmentationDataset(data_path='data', mode='trn', aug=aug, section=section, image_size=image_size)
-    val_ds = SegmentationDataset(data_path='data', mode='val', aug=False, section=section, image_size=image_size)
+def getSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64), foreground_pref_chance=0.):
+    trn_ds = SegmentationDataset(data_path='data', mode='trn', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
+    val_ds = SegmentationDataset(data_path='data', mode='val', aug=False, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
     trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=8)
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8)
     return trn_dl, val_dl

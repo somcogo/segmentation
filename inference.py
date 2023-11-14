@@ -5,6 +5,8 @@ import h5py
 import numpy as np
 from scipy import ndimage
 
+from utils.model_init import model_init
+
 def calculate_dice(pred, mask):
     intersection = (pred * mask).sum(axis=(1, 2, 3))
     dice = (2*intersection)/(pred.sum(axis=(1, 2, 3)) + mask.sum(axis=(1, 2, 3)))
@@ -35,7 +37,7 @@ def postprocess(pred_class_stack, pred_stack, prob_stack):
             postprocessed2[img_ndx] = labelled_components == largest_comp2
             postprocessed3[img_ndx] = labelled_components == largest_comp3
 
-    return comp_size_per_img, postprocessed, comp_sizes, postprocessed2, comp_sizes2, postprocessed3, comp_sizes3
+    return comp_size_per_img, postprocessed, postprocessed2, postprocessed3
 
 def postprocess_single_img(pred_class, pred, prob):
         labelled_components, num_components = ndimage.label(pred_class)
@@ -57,6 +59,7 @@ def postprocess_single_img(pred_class, pred, prob):
             postprocessed2 = labelled_components == largest_comp2
             postprocessed3 = labelled_components == largest_comp3
 
+        return num_components, postprocessed, postprocessed2, postprocessed3
         return num_components, postprocessed, postprocessed2, postprocessed3
 
 # From nnUNet github implementation TODO: don't forget to cite
@@ -117,7 +120,7 @@ def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=Fa
 
     return pred_class, pred, torch.nn.functional.softmax(pred, dim=1)
 
-def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=False, img_number=None):
+def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=False, img_number=None, gaussian_weights=False):
     inf_file = h5py.File('data/segmentation.hdf5')
     img_ds = inf_file['val']['img']
     mask_ds = inf_file['val']['mask']
@@ -130,7 +133,7 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
     prob_stack = np.zeros((img_number, 2, H, W, D))
     for img_index in range(img_number):
         img = torch.from_numpy(np.array(img_ds[img_index])).unsqueeze(0).unsqueeze(0)
-        pred_class, pred, prob = inference(img, model, section_size, device)
+        pred_class, pred, prob = inference(img, model, section_size, device, gaussian_weights=gaussian_weights)
 
         pred_class_stack[img_index] = pred_class.detach().cpu()
         pred_stack[img_index] = pred.detach().cpu()
@@ -140,13 +143,27 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
             print(img_index)
 
     mask = np.array(mask_ds[:img_number])
-    comp_size_per_img, postprocessed, comp_sizes, postprocessed2, comp_sizes2, postprocessed3, comp_sizes3 = postprocess(pred_class_stack, pred_stack, prob_stack)
+    comp_size_per_img, postprocessed, postprocessed2, postprocessed3 = postprocess(pred_class_stack, pred_stack, prob_stack)
     dice0 = calculate_dice(pred_class_stack, mask)
     dice1 = calculate_dice(postprocessed, mask)
     dice2 = calculate_dice(postprocessed2, mask)
     dice3 = calculate_dice(postprocessed3, mask)
 
     if keep_masks:
-        return dice0, dice1, dice2, dice3, comp_size_per_img, postprocessed, comp_sizes, postprocessed2, comp_sizes2, postprocessed3, comp_sizes3, pred_class_stack, pred_stack, prob_stack
+        return dice0, dice1, dice2, dice3, pred_class_stack, comp_size_per_img, postprocessed, postprocessed2, postprocessed3, 
     else:
-        return dice0, dice1, dice2, dice3, comp_size_per_img, postprocessed, comp_sizes, postprocessed2, comp_sizes2, postprocessed3, comp_sizes3, pred_stack
+        return dice0, dice1, dice2, dice3, comp_size_per_img
+    
+def do_inference_save_results(save_path, model_type, image_size, model_path, device, log=False, img_number=None, gaussian_weights=False):
+    model = model_init(model_type=model_type, image_size=image_size)
+    state_dict = torch.load(model_path)['model_state']
+    model.load_state_dict(state_dict)
+
+    dice0, dice1, dice2, dice3, comp_size_per_img = do_inference_on_val_ds(model, image_size, device, keep_masks=False, log=log, gaussian_weights=gaussian_weights)
+
+    data = {'dice':dice0,
+            'dice_pp_size':dice1,
+            'dice_pp_logit':dice2,
+            'dice_pp_prob':dice3,
+            'comp_sizes':comp_size_per_img,}
+    torch.save(data, save_path)
