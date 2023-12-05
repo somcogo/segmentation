@@ -84,7 +84,7 @@ def compute_gaussian(tile_size, sigma_scale: float = 1. / 8,
 
     return gaussian_importance_map
 
-def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=False):
+def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=False, overlap=None):
     model = model.to(device)
     model.eval()
     img = img.to(device)
@@ -95,12 +95,15 @@ def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=Fa
     # prob = torch.zeros((1, H, W, D), device=device)
     # prob2 = torch.zeros((1, 2, H, W, D), device=device)
     model.eval()
+    if overlap is None:
+        overlap = 0.5
     x, y, z = section_size
-    x_coords = list(range(0, H-x, x // 2))
+    x_step, y_step, z_step = [int(x*overlap), int(y*overlap), int(z*overlap)]
+    x_coords = list(range(0, H-x, x_step))
     x_coords.append(H-x)
-    y_coords = list(range(0, W-y, y // 2))
+    y_coords = list(range(0, W-y, y_step))
     y_coords.append(W-y)
-    z_coords = list(range(0, D-z, z // 2))
+    z_coords = list(range(0, D-z, z_step))
     z_coords.append(D-z)
     for x_c in x_coords:
         for y_c in y_coords:
@@ -120,7 +123,7 @@ def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=Fa
 
     return pred_class, pred, torch.nn.functional.softmax(pred, dim=1)
 
-def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=False, img_number=None, gaussian_weights=False):
+def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=False, img_number=None, gaussian_weights=False, overlap=None):
     inf_file = h5py.File('data/segmentation.hdf5')
     img_ds = inf_file['val']['img']
     mask_ds = inf_file['val']['mask']
@@ -133,7 +136,7 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
     prob_stack = np.zeros((img_number, 2, H, W, D))
     for img_index in range(img_number):
         img = torch.from_numpy(np.array(img_ds[img_index])).unsqueeze(0).unsqueeze(0)
-        pred_class, pred, prob = inference(img, model, section_size, device, gaussian_weights=gaussian_weights)
+        pred_class, pred, prob = inference(img, model, section_size, device, gaussian_weights=gaussian_weights, overlap=overlap)
 
         pred_class_stack[img_index] = pred_class.detach().cpu()
         pred_stack[img_index] = pred.detach().cpu()
@@ -150,20 +153,21 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
     dice3 = calculate_dice(postprocessed3, mask)
 
     if keep_masks:
-        return dice0, dice1, dice2, dice3, pred_class_stack, comp_size_per_img, postprocessed, postprocessed2, postprocessed3, 
+        return dice0, dice1, dice2, dice3, pred_stack, pred_class_stack, comp_size_per_img, postprocessed, postprocessed2, postprocessed3, 
     else:
         return dice0, dice1, dice2, dice3, comp_size_per_img
     
-def do_inference_save_results(save_path, model_type, image_size, model_path, device, log=False, img_number=None, gaussian_weights=False):
+def do_inference_save_results(save_path, model_type, image_size, model_path, device, log=False, img_number=None, gaussian_weights=False, overlap=None):
     model = model_init(model_type=model_type, image_size=image_size)
     state_dict = torch.load(model_path)['model_state']
     model.load_state_dict(state_dict)
 
-    dice0, dice1, dice2, dice3, comp_size_per_img = do_inference_on_val_ds(model, image_size, device, keep_masks=False, log=log, gaussian_weights=gaussian_weights)
+    dice0, dice1, dice2, dice3, pred_stack, pred_class_stack, comp_size_per_img, postprocessed, postprocessed2, postprocessed3 = do_inference_on_val_ds(model, image_size, device, keep_masks=True, log=log, gaussian_weights=gaussian_weights, overlap=overlap)
 
     data = {'dice':dice0,
             'dice_pp_size':dice1,
             'dice_pp_logit':dice2,
             'dice_pp_prob':dice3,
-            'comp_sizes':comp_size_per_img,}
+            'comp_sizes':comp_size_per_img,
+            'pred':pred_stack,}
     torch.save(data, save_path)
