@@ -11,24 +11,25 @@ from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.tensorboard import SummaryWriter
 
-from utils.logconf import logging, my_logger
+from utils.logconf import logging
 from utils.data_loader import getSegmentationDataLoader, getSwarmSegmentationDataLoader
 from utils.model_init import model_init
 from utils.segmentation_mask import draw_segmenation_mask
 from utils.scheduler import get_cosine_lr_with_linear_warmup
 from utils.merge_strategies import get_layer_list
+from inference import do_inference_save_results
 
-log = my_logger
+log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
 log.setLevel(logging.INFO)
-log.setLevel(logging.DEBUG)
+# log.setLevel(logging.DEBUG)
 
 class SegmentationTrainingApp:
     def __init__(self, epochs=10, batch_size=16, logdir='test', lr=1e-3,
                  data_ratio=1., comment='dwlpt', XEweight=None, loss_fn='XE',
                  model_type='swinunetr', optimizer_type='adam', weight_decay=0,
                  betas=(0.9, 0.999), abs_pos_emb=False, scheduler_type=None,
-                 swin_type=1, aug=False, drop_rate=0, attn_drop_rate=0,
+                 swin_type=1, aug='nnunet', drop_rate=0, attn_drop_rate=0,
                  image_size=64, in_channels=1, T_0=2000, section='large',
                  unet_depth=None, pretrained=True, swarm_training=False,
                  model_path=None, grad_accumulation=1, foreground_pref_chance=0.):
@@ -43,25 +44,21 @@ class SegmentationTrainingApp:
         self.comment = comment
         self.loss_fn = loss_fn
         self.model_type = model_type
+        assert aug in ['nnunet', 'old']
         self.aug = aug
-        if isinstance(image_size, int):
-            self.image_size = (image_size, image_size, image_size)
-        else:
-            self.image_size = image_size
+        self.image_size = [image_size, image_size, image_size] if isinstance(image_size, int) else  image_size
         self.section = section
         self.swarm_traning = swarm_training
         self.grad_accumulation = grad_accumulation
         self.foreground_pred_chance = foreground_pref_chance
+        self.T_0 = T_0 if T_0 is not None else epochs
+        self.model_path = model_path
 
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
-        if XEweight is not None:
-            self.XEweight = torch.tensor([1, XEweight])
-            self.XEweight = self.XEweight.to(device=self.device, dtype=torch.float)
-        else:
-            self.XEweight = None
-        self.logdir = os.path.join('./runs', self.logdir_name)
+        self.XEweight = torch.tensor([1, XEweight]).to(device=self.device, dtype=torch.float) if XEweight is not None else None
+        self.logdir = os.path.join('/home/hansel/developer/segmentation/runs', self.logdir_name)
         os.makedirs(self.logdir, exist_ok=True)
         self.trn_writer = None
         self.val_writer = None
@@ -83,6 +80,9 @@ class SegmentationTrainingApp:
         else:
             model = model_init(model_type, swin_type, self.image_size, drop_rate, attn_drop_rate, ape, unet_depth, in_channels, pretrained)
             models = None
+        if self.model_path is not None:
+            state_dict = torch.load(self.model_path)['model_state']
+            model.load_state_dict(state_dict)
         if self.use_cuda:
             log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
             if self.swarm_traning:
@@ -116,12 +116,12 @@ class SegmentationTrainingApp:
             if scheduler_type == 'cosinewarmre':
                 return [CosineAnnealingWarmRestarts(opt, T_0) for opt in self.optimizers]
             elif scheduler_type == 'warmupcosine':
-                return [get_cosine_lr_with_linear_warmup(optim=opt, warm_up_epochs=20, T_max=self.epochs-20, eta_min=1e-6) for opt in self.optimizers]
+                return [get_cosine_lr_with_linear_warmup(optim=opt, warm_up_epochs=20, T_max=self.T_0-20, eta_min=1e-6) for opt in self.optimizers]
         else:
             if scheduler_type == 'cosinewarmre':
                 return CosineAnnealingWarmRestarts(self.optimizer, T_0)
             elif scheduler_type == 'warmupcosine':
-                return get_cosine_lr_with_linear_warmup(optim=self.optimizer, warm_up_epochs=20, T_max=self.epochs-20, eta_min=1e-6)
+                return get_cosine_lr_with_linear_warmup(optim=self.optimizer, warm_up_epochs=20, T_max=self.T_0-20, eta_min=1e-6)
         return None
 
     def initDl(self):
@@ -150,34 +150,49 @@ class SegmentationTrainingApp:
                 trnMetrics = self.doSwarmTraining(train_dl)
             else:
                 trnMetrics = self.doTraining(train_dl)
-            self.logMetrics(epoch_ndx, 'trn', trnMetrics)
+            trn_dice = self.logMetrics(epoch_ndx, 'trn', trnMetrics)
 
             if epoch_ndx == 1 or epoch_ndx % validation_cadence == 0:
                 if self.swarm_traning:
-                    valMetrics, val_loss, dice_score, imgs = self.doSwarmValidation(val_dl)
+                    valMetrics, val_loss, imgs = self.doSwarmValidation(val_dl)
                 else:
-                    valMetrics, val_loss, dice_score, imgs = self.doValidation(val_dl)
-                self.logMetrics(epoch_ndx, 'val', valMetrics, imgs)
-                val_best = max(dice_score, val_best)
+                    valMetrics, val_loss, imgs = self.doValidation(val_dl)
+                val_dice = self.logMetrics(epoch_ndx, 'val', valMetrics, imgs)
+                val_best = max(val_dice, val_best)
 
-                self.saveModel('segmentation', epoch_ndx, valMetrics, dice_score == val_best)
+                self.saveModel('segmentation', epoch_ndx, valMetrics, val_dice == val_best)
 
                 if logging_index:
                     log.info("Epoch {} of {}, val loss {}, dice score {}".format(
                         epoch_ndx,
                         self.epochs,
                         val_loss,
-                        dice_score,
+                        val_dice,
                     ))
             
-            if self.swarm_traning:
-                if self.schedulers is not None:
-                    for scheduler in self.schedulers:
-                        scheduler.step
-                self.mergeModels()
-            else:
-                if self.scheduler is not None:
-                    self.scheduler.step()
+            if epoch_ndx < self.T_0:
+                if self.swarm_traning:
+                    if self.schedulers is not None:
+                        for scheduler in self.schedulers:
+                            scheduler.step
+                    self.mergeModels()
+                else:
+                    if self.scheduler is not None:
+                        self.scheduler.step()
+
+        if self.epochs > 100:
+            log.info('Training finished. Performing inference on validation set')
+            save_path = os.path.join(
+                'saved_metrics',
+                'inference',
+                self.logdir_name,
+                'segmentation_{}_{}-gaussian-inference'.format(
+                    self.time_str,
+                    self.comment,
+                )
+            )
+            os.makedirs(os.path.dirname(save_path), mode=0o755, exist_ok=True)
+            do_inference_save_results(save_path=save_path, model=self.model, image_size=self.image_size, log=False, gaussian_weights=True)
 
         if hasattr(self, 'trn_writer'):
             self.trn_writer.close()
@@ -188,7 +203,7 @@ class SegmentationTrainingApp:
         trnMetrics = torch.zeros(14, len(train_dl.dataset), device=self.device)
 
         for batch_ndx, batch_tuple in enumerate(train_dl):
-            loss, _, _ = self.computeBatchLoss(
+            loss, _ = self.computeBatchLoss(
                 self.model,
                 batch_ndx,
                 batch_tuple,
@@ -210,7 +225,7 @@ class SegmentationTrainingApp:
 
         for batch_ndx, batch_tuple in enumerate(train_dl):
             self.optimizer.zero_grad()
-            loss, _, _ = self.computeBatchLoss(
+            loss, _ = self.computeBatchLoss(
                 self.model,
                 batch_ndx,
                 batch_tuple,
@@ -234,7 +249,7 @@ class SegmentationTrainingApp:
                     need_imgs = True
                 else:
                     need_imgs = False
-                val_loss, dice_score, imgs = self.computeBatchLoss(
+                val_loss, imgs = self.computeBatchLoss(
                     self.model,
                     batch_ndx,
                     batch_tuple,
@@ -245,7 +260,7 @@ class SegmentationTrainingApp:
                 if imgs is not None:
                     imgs_to_save = imgs
 
-        return valMetrics.to('cpu'), val_loss, dice_score, imgs_to_save
+        return valMetrics.to('cpu'), val_loss, imgs_to_save
 
     def doSwarmValidation(self, val_dl):
         with torch.no_grad():
@@ -257,7 +272,7 @@ class SegmentationTrainingApp:
                     need_imgs = True
                 else:
                     need_imgs = False
-                val_loss, dice_score, imgs = self.computeBatchLoss(
+                val_loss, imgs = self.computeBatchLoss(
                     self.model,
                     batch_ndx,
                     batch_tuple,
@@ -268,7 +283,7 @@ class SegmentationTrainingApp:
                 if imgs is not None:
                     imgs_to_save = imgs
 
-        return valMetrics.to('cpu'), val_loss, dice_score, imgs_to_save
+        return valMetrics.to('cpu'), val_loss, imgs_to_save
     
     def computeMetrics(self, pred_label, mask):
         eps = 1e-5
@@ -325,9 +340,9 @@ class SegmentationTrainingApp:
             im1 = segmentation_mask[:, :, :, z]
             im2 = segmentation_mask[:, :, y, :]
             im3 = segmentation_mask[:, x, :, :]
-            return loss.mean(), metrics[6].mean(), [im1, im2, im3]
+            return loss.mean(), [im1, im2, im3]
         else:
-            return loss.mean(), metrics[6].mean(), None
+            return loss.mean(), None
 
     def logMetrics(
         self,
@@ -374,6 +389,7 @@ class SegmentationTrainingApp:
                     dataformats='CHW')
 
         writer.flush()
+        return dice_score
 
     def mergeModels(self, is_init=False, model_path=None):
         if is_init:
