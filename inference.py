@@ -64,7 +64,7 @@ def postprocess_single_img(pred_class, pred, prob):
 
 # From nnUNet github implementation TODO: don't forget to cite
 @lru_cache(maxsize=2)
-def compute_gaussian(tile_size, sigma_scale: float = 1. / 8,
+def compute_gaussian(tile_size : tuple, sigma_scale: float = 1. / 8,
                      value_scaling_factor: float = 1, dtype=torch.float16, device='cuda:0') \
         -> torch.Tensor:
     tmp = np.zeros(tile_size)
@@ -91,7 +91,7 @@ def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=Fa
     H, W, D = img.shape[-3:]
     pred = torch.zeros((1, 2, H, W, D), device=device)
     n_predictions = torch.zeros((H, W, D), device=device)
-    gaussian = compute_gaussian(section_size, sigma_scale=1. / 8, device=device) if gaussian_weights else None
+    gaussian = compute_gaussian(tile_size=tuple(section_size), device=device) if gaussian_weights else None
     # prob = torch.zeros((1, H, W, D), device=device)
     # prob2 = torch.zeros((1, 2, H, W, D), device=device)
     model.eval()
@@ -121,7 +121,7 @@ def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=Fa
     return pred_class, pred, torch.nn.functional.softmax(pred, dim=1)
 
 def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=False, img_number=None, gaussian_weights=False):
-    inf_file = h5py.File('data/segmentation.hdf5')
+    inf_file = h5py.File('/home/hansel/developer/segmentation/data/segmentation.hdf5')
     img_ds = inf_file['val']['img']
     mask_ds = inf_file['val']['mask']
     if img_number is None:
@@ -140,7 +140,7 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
         prob_stack[img_index] = prob.detach().cpu()
         
         if log:
-            print(img_index)
+            print('scan', img_index, '/', img_number)
 
     mask = np.array(mask_ds[:img_number])
     comp_size_per_img, postprocessed, postprocessed2, postprocessed3 = postprocess(pred_class_stack, pred_stack, prob_stack)
@@ -154,10 +154,11 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
     else:
         return dice0, dice1, dice2, dice3, comp_size_per_img
     
-def do_inference_save_results(save_path, model_type, image_size, model_path, device, log=False, img_number=None, gaussian_weights=False):
-    model = model_init(model_type=model_type, image_size=image_size)
-    state_dict = torch.load(model_path)['model_state']
-    model.load_state_dict(state_dict)
+def do_inference_save_results(save_path, image_size, model=None, model_type=None, model_path=None, device='cuda:0', log=False, img_number=None, gaussian_weights=False):
+    if model is None:
+        model = model_init(model_type=model_type, image_size=image_size)
+        state_dict = torch.load(model_path)['model_state']
+        model.load_state_dict(state_dict)
 
     dice0, dice1, dice2, dice3, comp_size_per_img = do_inference_on_val_ds(model, image_size, device, keep_masks=False, log=log, gaussian_weights=gaussian_weights)
 
