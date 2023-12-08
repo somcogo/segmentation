@@ -60,7 +60,6 @@ def postprocess_single_img(pred_class, pred, prob):
             postprocessed3 = labelled_components == largest_comp3
 
         return num_components, postprocessed, postprocessed2, postprocessed3
-        return num_components, postprocessed, postprocessed2, postprocessed3
 
 # From nnUNet github implementation TODO: don't forget to cite
 @lru_cache(maxsize=2)
@@ -163,12 +162,13 @@ def do_inference_save_results(save_path, image_size, model=None, model_type=None
         state_dict = torch.load(model_path)['model_state']
         model.load_state_dict(state_dict)
 
-    dice0, dice1, dice2, dice3, pred_stack, pred_class_stack, comp_size_per_img, postprocessed, postprocessed2, postprocessed3 = do_inference_on_val_ds(model, image_size, device, keep_masks=True, log=log, gaussian_weights=gaussian_weights, overlap=overlap)
+    dice0, dice1, dice2, dice3, pred_stack, pred_class_stack, comp_size_per_img, postprocessed, postprocessed2, postprocessed3 = do_inference_on_val_ds(model, image_size, device, keep_masks=True, log=log, gaussian_weights=gaussian_weights, overlap=overlap, img_number=img_number)
 
     data = {'dice':dice0,
             'dice_pp_size':dice1,
             'dice_pp_logit':dice2,
             'dice_pp_prob':dice3,
-            'comp_sizes':comp_size_per_img,
-            'pred':pred_stack,}
+            'comp_sizes':comp_size_per_img}
+    for img_ndx in range(pred_stack.shape[0]):
+        data[img_ndx] = pred_stack[img_ndx]
     torch.save(data, save_path)
