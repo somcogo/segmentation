@@ -29,11 +29,14 @@ class SegmentationDataset(Dataset):
         return image.unsqueeze(0), mask.unsqueeze(0)
 
 class SwarmSegmentationDataset(Dataset):
-    def __init__(self, data_path, mode, site, aug=False, section='random'):
+    def __init__(self, data_path, mode, site, aug='nnunet', section='random', image_size=None, foreground_pref_chance=0.):
         super().__init__()
         self.aug = aug
         self.section = section
+        self.image_size = image_size
+        self.foreground_pref_chance = foreground_pref_chance
         self.site = site
+        self.mode = mode
 
         self.id_dict = torch.load('data/segmentation_id_data.pt')[mode]
 
@@ -50,19 +53,10 @@ class SwarmSegmentationDataset(Dataset):
         elif self.site == 'asbach':
             index = index + len(self.id_dict['alt']) + len(self.id_dict['neu'])
 
-        if self.section == 'random':
-            rng = np.random.default_rng()
-            x1 = rng.integers(0, self.img_ds.shape[1] - 128)
-            y1 = rng.integers(0, self.img_ds.shape[2] - 128)
-            z1 = rng.integers(0, self.img_ds.shape[3] - 128)
-            x2, y2, z2 = x1 + 128, y1 + 128, z1 + 128
-        elif self.section == 'whole':
-            x1, x2, y1, y2, z1, z2 = 0, 350, 0, 350, 0, 150
-        image = np.array(self.img_ds[index, x1:x2, y1:y2, z1:z2])
-        mask = np.array(self.mask_ds[index, x1:x2, y1:y2, z1:z2])
-        if self.aug:
-            image, mask = crop_section_and_aug(image, mask)
-        return torch.from_numpy(image.copy()).unsqueeze(0), torch.from_numpy(mask.copy()).unsqueeze(0)
+        image = np.array(self.img_ds[index])
+        mask = np.array(self.mask_ds[index])
+        image, mask = crop_section_and_aug(image, mask, self.image_size, mode=self.mode, aug='nnunet', foreground_pref_chance=self.foreground_pref_chance, )
+        return image.unsqueeze(0), mask.unsqueeze(0)
 
 def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_size=(64, 64, 64), foreground_pref_chance=0.):
     trn_ds = SegmentationDataset(data_path='/home/hansel/developer/segmentation/data', mode='trn', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
@@ -71,9 +65,9 @@ def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True)
     return trn_dl, val_dl
 
-def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random'):
-    trn_ds_list = [SwarmSegmentationDataset('/home/hansel/developer/segmentation/data', 'trn', site, aug, section) for site in ['alt', 'neu', 'asbach']]
-    val_ds_list = [SwarmSegmentationDataset('/home/hansel/developer/segmentation/data', 'val', site, False, section) for site in ['alt', 'neu', 'asbach']]
+def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64), foreground_pref_chance=0.):
+    trn_ds_list = [SwarmSegmentationDataset('/home/hansel/developer/segmentation/data', 'trn', site, aug, section, image_size=image_size, foreground_pref_chance=foreground_pref_chance) for site in ['alt', 'neu', 'asbach']]
+    val_ds_list = [SwarmSegmentationDataset('/home/hansel/developer/segmentation/data', 'val', site, False, section, image_size=image_size, foreground_pref_chance=foreground_pref_chance) for site in ['alt', 'neu', 'asbach']]
     trn_dl_list = [DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=8) for trn_ds in trn_ds_list]
     val_dl_list = [DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8) for val_ds in val_ds_list]
     return trn_dl_list, val_dl_list

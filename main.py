@@ -32,7 +32,8 @@ class SegmentationTrainingApp:
                  swin_type=1, aug='nnunet', drop_rate=0, attn_drop_rate=0,
                  image_size=64, in_channels=1, T_0=2000, section='large',
                  unet_depth=None, pretrained=True, swarm_training=False,
-                 model_path=None, grad_accumulation=1, foreground_pref_chance=0.):
+                 model_path=None, grad_accumulation=1, foreground_pref_chance=0.,
+                 swarm_strat='all'):
         
         self.settings = copy.deepcopy(locals())
         del self.settings['self']
@@ -48,11 +49,12 @@ class SegmentationTrainingApp:
         self.aug = aug
         self.image_size = [image_size, image_size, image_size] if isinstance(image_size, int) else  image_size
         self.section = section
-        self.swarm_traning = swarm_training
+        self.swarm_training = swarm_training
         self.grad_accumulation = grad_accumulation
         self.foreground_pred_chance = foreground_pref_chance
         self.T_0 = T_0 if T_0 is not None else epochs
         self.model_path = model_path
+        self.strategy = swarm_strat
 
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
@@ -75,7 +77,7 @@ class SegmentationTrainingApp:
             self.scheduler = self.initScheduler(scheduler_type, T_0)
 
     def initModel(self, model_type, swin_type, drop_rate, attn_drop_rate, ape, unet_depth, in_channels, pretrained):
-        if self.swarm_traning:
+        if self.swarm_training:
             models = [model_init(model_type, swin_type, self.image_size, drop_rate, attn_drop_rate, ape, unet_depth, in_channels, pretrained) for _ in range(3)]
         else:
             model = model_init(model_type, swin_type, self.image_size, drop_rate, attn_drop_rate, ape, unet_depth, in_channels, pretrained)
@@ -85,11 +87,12 @@ class SegmentationTrainingApp:
             model.load_state_dict(state_dict)
         if self.use_cuda:
             log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
-            if self.swarm_traning:
-                for model in models:
+            if self.swarm_training:
+                for i, model in enumerate(models):
                     if torch.cuda.device_count() > 1:
                         model = DataParallel(model)
                     model = model.to(self.device)
+                    models[i] = model
             else:
                 if torch.cuda.device_count() > 1:
                     model = DataParallel(model)
@@ -100,7 +103,7 @@ class SegmentationTrainingApp:
         return out
 
     def initOptimizer(self, optimizer_type, lr, betas, weight_decay):
-        if self.swarm_traning:
+        if self.swarm_training:
             if optimizer_type == 'adam':
                 return [Adam(params=model.parameters(), lr=lr, betas=betas) for model in self.models]
             elif optimizer_type == 'adamw':
@@ -112,7 +115,7 @@ class SegmentationTrainingApp:
                 return AdamW(params=self.model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
 
     def initScheduler(self, scheduler_type, T_0):
-        if self.swarm_traning:
+        if self.swarm_training:
             if scheduler_type == 'cosinewarmre':
                 return [CosineAnnealingWarmRestarts(opt, T_0) for opt in self.optimizers]
             elif scheduler_type == 'warmupcosine':
@@ -125,9 +128,9 @@ class SegmentationTrainingApp:
         return None
 
     def initDl(self):
-        if self.swarm_traning:
-            return getSwarmSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size)
-        return getSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size)
+        if self.swarm_training:
+            return getSwarmSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size, foreground_pref_chance=self.foreground_pred_chance)
+        return getSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size, foreground_pref_chance=self.foreground_pred_chance)
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
@@ -146,14 +149,24 @@ class SegmentationTrainingApp:
         for epoch_ndx in range(1, self.epochs + 1):
             logging_index = epoch_ndx % 10**(math.floor(math.log(epoch_ndx, 10))) == 0
 
-            if self.swarm_traning:
+            if self.swarm_training:
                 trnMetrics = self.doSwarmTraining(train_dl)
+                self.mergeModels()
             else:
                 trnMetrics = self.doTraining(train_dl)
             trn_dice = self.logMetrics(epoch_ndx, 'trn', trnMetrics)
+            
+            if epoch_ndx < self.T_0:
+                if self.swarm_training:
+                    if self.schedulers is not None:
+                        for scheduler in self.schedulers:
+                            scheduler.step
+                else:
+                    if self.scheduler is not None:
+                        self.scheduler.step()
 
             if epoch_ndx == 1 or epoch_ndx % validation_cadence == 0:
-                if self.swarm_traning:
+                if self.swarm_training:
                     valMetrics, val_loss, imgs = self.doSwarmValidation(val_dl)
                 else:
                     valMetrics, val_loss, imgs = self.doValidation(val_dl)
@@ -169,16 +182,6 @@ class SegmentationTrainingApp:
                         val_loss,
                         val_dice,
                     ))
-            
-            if epoch_ndx < self.T_0:
-                if self.swarm_traning:
-                    if self.schedulers is not None:
-                        for scheduler in self.schedulers:
-                            scheduler.step
-                    self.mergeModels()
-                else:
-                    if self.scheduler is not None:
-                        self.scheduler.step()
 
         if self.epochs > 100:
             log.info('Training finished. Performing inference on validation set')
@@ -200,7 +203,7 @@ class SegmentationTrainingApp:
 
     def doTraining(self, train_dl):
         self.model.train()
-        trnMetrics = torch.zeros(14, len(train_dl.dataset), device=self.device)
+        trnMetrics = torch.zeros(13, len(train_dl.dataset), device=self.device)
 
         for batch_ndx, batch_tuple in enumerate(train_dl):
             loss, _ = self.computeBatchLoss(
@@ -220,29 +223,32 @@ class SegmentationTrainingApp:
         return trnMetrics.to('cpu')
 
     def doSwarmTraining(self, train_dl):
-        self.model.train()
-        trnMetrics = torch.zeros(14, len(train_dl.dataset), device=self.device)
+        local_metrics = [torch.zeros(13, len(dl.dataset), device=self.device) for dl in train_dl]
+        # trnMetrics = torch.zeros(14, len(train_dl.dataset), device=self.device)
 
-        for batch_ndx, batch_tuple in enumerate(train_dl):
-            self.optimizer.zero_grad()
-            loss, _ = self.computeBatchLoss(
-                self.model,
-                batch_ndx,
-                batch_tuple,
-                self.batch_size,
-                trnMetrics)
+        for site, dl in enumerate(train_dl):
+            self.models[site].train()
+            for batch_ndx, batch_tuple in enumerate(dl):
+                self.optimizers[site].zero_grad()
+                loss, _ = self.computeBatchLoss(
+                    self.models[site],
+                    batch_ndx,
+                    batch_tuple,
+                    self.batch_size,
+                    local_metrics[site])
 
-            loss.backward()
-            self.optimizer.step()
+                loss.backward()
+                self.optimizers[site].step()
 
-        self.totalTrainingSamples_count += len(train_dl.dataset)
+        trn_metrics = torch.concat(local_metrics, dim=1)
+        self.totalTrainingSamples_count += trn_metrics.shape[1]
 
-        return trnMetrics.to('cpu')
+        return trn_metrics.to('cpu')
 
     def doValidation(self, val_dl):
         with torch.no_grad():
             self.model.eval()
-            valMetrics = torch.zeros(14, len(val_dl.dataset), device=self.device)
+            valMetrics = torch.zeros(13, len(val_dl.dataset), device=self.device)
 
             for batch_ndx, batch_tuple in enumerate(val_dl):
                 if batch_ndx == 0:
@@ -263,27 +269,31 @@ class SegmentationTrainingApp:
         return valMetrics.to('cpu'), val_loss, imgs_to_save
 
     def doSwarmValidation(self, val_dl):
-        with torch.no_grad():
-            self.model.eval()
-            valMetrics = torch.zeros(14, len(val_dl.dataset), device=self.device)
+        local_metrics = [torch.zeros(13, len(dl.dataset), device=self.device) for dl in val_dl]
+        # valMetrics = torch.zeros(14, len(val_dl.dataset), device=self.device)
+        for site, dl in enumerate(val_dl):
+            with torch.no_grad():
+                self.models[site].eval()
 
-            for batch_ndx, batch_tuple in enumerate(val_dl):
-                if batch_ndx == 0:
-                    need_imgs = True
-                else:
-                    need_imgs = False
-                val_loss, imgs = self.computeBatchLoss(
-                    self.model,
-                    batch_ndx,
-                    batch_tuple,
-                    self.batch_size,
-                    valMetrics,
-                    need_imgs=need_imgs
-                )
-                if imgs is not None:
-                    imgs_to_save = imgs
+                for batch_ndx, batch_tuple in enumerate(dl):
+                    if batch_ndx == 0 and site == 0:
+                        need_imgs = True
+                    else:
+                        need_imgs = False
+                    val_loss, imgs = self.computeBatchLoss(
+                        self.models[site],
+                        batch_ndx,
+                        batch_tuple,
+                        self.batch_size,
+                        local_metrics[site],
+                        need_imgs=need_imgs
+                    )
+                    if imgs is not None:
+                        imgs_to_save = imgs
+        
+        val_metrics = torch.concat(local_metrics, dim=1)
 
-        return valMetrics.to('cpu'), val_loss, imgs_to_save
+        return val_metrics.to('cpu'), val_loss, imgs_to_save
     
     def computeMetrics(self, pred_label, mask):
         eps = 1e-5
@@ -375,7 +385,6 @@ class SegmentationTrainingApp:
         metrics_dict['correct/all'] = metrics[9, :].mean()
         metrics_dict['correct/pos'] = metrics[10, :].mean()
         metrics_dict['correct/neg'] = metrics[11, :].mean()
-        metrics_dict['Hausdorff distance'] = metrics[13, :].mean()
 
         writer = getattr(self, mode_str + '_writer')
         for key, value in metrics_dict.items():
@@ -390,6 +399,32 @@ class SegmentationTrainingApp:
 
         writer.flush()
         return dice_score
+    
+    def convert_metrics_to_dict(metrics, tag):
+        true_pos = metrics[3,:].sum()
+        false_pos = metrics[4,:].sum()
+        false_neg = metrics[5,:].sum()
+        
+        epsilon = 1e-5
+        dice_score = (2 * true_pos + epsilon) / (2 * true_pos +  false_pos + false_neg + epsilon)
+        precision = (true_pos + epsilon) / (true_pos + false_pos + epsilon)
+        recall = (true_pos + epsilon) / (true_pos + false_neg + epsilon)
+
+        metrics_dict = {}
+        metrics_dict['loss/all-{}'.format(tag)] = metrics[0, :].mean()
+        metrics_dict['loss/pos-{}'.format(tag)] = metrics[1, :].mean()
+        metrics_dict['loss/neg-{}'.format(tag)] = metrics[2, :].mean()
+        metrics_dict['overall/dice-{}'.format(tag)] = dice_score
+        metrics_dict['overall/precision-{}'.format(tag)] = precision
+        metrics_dict['overall/recall-{}'.format(tag)] = recall
+        metrics_dict['average/dice-{}'.format(tag)] = metrics[6, :].mean()
+        metrics_dict['average/precision-{}'.format(tag)] = metrics[7, :].mean()
+        metrics_dict['average/recall-{}'.format(tag)] = metrics[8, :].mean()
+        metrics_dict['correct/all-{}'.format(tag)] = metrics[9, :].mean()
+        metrics_dict['correct/pos-{}'.format(tag)] = metrics[10, :].mean()
+        metrics_dict['correct/neg-{}'.format(tag)] = metrics[11, :].mean()
+
+        return metrics_dict
 
     def mergeModels(self, is_init=False, model_path=None):
         if is_init:
@@ -402,12 +437,12 @@ class SegmentationTrainingApp:
             else:
                 state_dict = self.models[0].state_dict()
             if 'embedding.weight' in '\t'.join(state_dict.keys()):
-                state_dict['embedding.weight'] = state_dict['embedding.weight'][0].unsqueeze(0).repeat(self.site_number, 1)
+                state_dict['embedding.weight'] = state_dict['embedding.weight'][0].unsqueeze(0).repeat(3, 1)
             for model in self.models:
                 model.load_state_dict(state_dict, strict=False)
         else:
             original_list = [name for name, _ in self.models[0].named_parameters()]
-            layer_list = get_layer_list(model=self.model_name, strategy=self.strategy, original_list=original_list)
+            layer_list = get_layer_list(model=self.model_type, strategy=self.strategy, original_list=original_list)
             state_dicts = [model.state_dict() for model in self.models]
             param_dict = {layer: torch.zeros(state_dicts[0][layer].shape, device=self.device) for layer in layer_list}
 
@@ -442,17 +477,17 @@ class SegmentationTrainingApp:
             )
             os.makedirs(os.path.dirname(data_file_path), mode=0o755, exist_ok=True)
 
-            model = self.model
+            model = self.models[0]
             if isinstance(model, DataParallel):
                 model = model.module
 
             model_state = {
                 'model_state': model.state_dict(),
                 'model_name': type(model).__name__,
-                'optimizer_state': self.optimizer.state_dict(),
-                'optimizer_name': type(self.optimizer).__name__,
-                'scheduler_state': self.scheduler.state_dict(),
-                'scheduler_name': type(self.scheduler).__name__,
+                'optimizer_state': self.optimizers[0].state_dict(),
+                'optimizer_name': type(self.optimizers[0]).__name__,
+                'scheduler_state': self.schedulers[0].state_dict(),
+                'scheduler_name': type(self.schedulers[0]).__name__,
                 'epoch': epoch_ndx,
             }
             data_state = {
