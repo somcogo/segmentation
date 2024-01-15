@@ -123,7 +123,7 @@ def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=Fa
     return pred_class, pred, torch.nn.functional.softmax(pred, dim=1)
 
 def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=False, img_number=None, gaussian_weights=False, overlap=None):
-    inf_file = h5py.File('/home/hansel/developer/segmentation/data/segmentation.hdf5')
+    inf_file = h5py.File('data/segmentation.hdf5')
     img_ds = inf_file['val']['img']
     mask_ds = inf_file['val']['mask']
     if img_number is None:
