@@ -8,7 +8,7 @@ import torch
 from utils.ops import crop_section_and_aug
 
 class SegmentationDataset(Dataset):
-    def __init__(self, data_path, mode, aug='nnunet', section='random', image_size=None, foreground_pref_chance=0.):
+    def __init__(self, data_path, mode, aug='nnunet', section='random', image_size=None, foreground_pref_chance=0., rng_seed=None):
         super().__init__()
         file = h5py.File(os.path.join(data_path, 'segmentation.hdf5'), 'r')
         self.img_ds = file[mode]['img']
@@ -18,6 +18,7 @@ class SegmentationDataset(Dataset):
         self.image_size = image_size
         self.foreground_pref_chance = foreground_pref_chance
         self.mode = mode
+        self.rng_seed = rng_seed
 
     def __len__(self):
         return self.img_ds.shape[0]
@@ -25,24 +26,23 @@ class SegmentationDataset(Dataset):
     def __getitem__(self, index):
         image = np.array(self.img_ds[index])
         mask = np.array(self.mask_ds[index])
-        image, mask = crop_section_and_aug(image, mask, self.image_size, mode=self.mode, aug='nnunet', foreground_pref_chance=self.foreground_pref_chance, )
+        image, mask = crop_section_and_aug(image, mask, self.image_size, mode=self.mode, aug=self.aug, foreground_pref_chance=self.foreground_pref_chance, rng_seed=self.rng_seed)
         return image.unsqueeze(0), mask.unsqueeze(0)
 
 class SwarmSegmentationDataset(Dataset):
-    def __init__(self, data_path, mode, site, aug='nnunet', section='random', image_size=None, foreground_pref_chance=0.):
+    def __init__(self, data_path, mode, site, aug='nnunet', section='random', image_size=None, foreground_pref_chance=0., rng_seed=None):
         super().__init__()
+        self.id_dict = torch.load('/home/hansel/developer/segmentation/data/segmentation_id_data.pt')[mode]
+        file = h5py.File(os.path.join(data_path, 'segmentation.hdf5'), 'r')
+        self.img_ds = file[mode]['img']
+        self.mask_ds = file[mode]['mask']
         self.aug = aug
         self.section = section
         self.image_size = image_size
         self.foreground_pref_chance = foreground_pref_chance
         self.site = site
         self.mode = mode
-
-        self.id_dict = torch.load('data/segmentation_id_data.pt')[mode]
-
-        file = h5py.File(os.path.join(data_path, 'segmentation.hdf5'), 'r')
-        self.img_ds = file[mode]['img']
-        self.mask_ds = file[mode]['mask']
+        self.rng_seed = rng_seed
 
     def __len__(self):
         return len(self.id_dict[self.site])
@@ -55,7 +55,7 @@ class SwarmSegmentationDataset(Dataset):
 
         image = np.array(self.img_ds[index])
         mask = np.array(self.mask_ds[index])
-        image, mask = crop_section_and_aug(image, mask, self.image_size, mode=self.mode, aug='nnunet', foreground_pref_chance=self.foreground_pref_chance, )
+        image, mask = crop_section_and_aug(image, mask, self.image_size, mode=self.mode, aug=self.aug, foreground_pref_chance=self.foreground_pref_chance, rng_seed=self.rng_seed)
         return image.unsqueeze(0), mask.unsqueeze(0)
 
 def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_size=(64, 64, 64), foreground_pref_chance=0.):

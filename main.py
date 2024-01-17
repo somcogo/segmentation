@@ -33,7 +33,7 @@ class SegmentationTrainingApp:
                  image_size=64, in_channels=1, T_0=2000, section='large',
                  unet_depth=None, pretrained=True, swarm_training=False,
                  model_path=None, grad_accumulation=1, foreground_pref_chance=0.,
-                 swarm_strat='all'):
+                 swarm_strat='all', site_repetition=[1, 1, 1]):
         
         self.settings = copy.deepcopy(locals())
         del self.settings['self']
@@ -55,6 +55,7 @@ class SegmentationTrainingApp:
         self.T_0 = T_0 if T_0 is not None else epochs
         self.model_path = model_path
         self.strategy = swarm_strat
+        self.site_repetition = site_repetition
 
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
@@ -68,7 +69,8 @@ class SegmentationTrainingApp:
 
         if swarm_training:
             self.models = self.initModel(model_type, swin_type, drop_rate, attn_drop_rate, abs_pos_emb, unet_depth, in_channels, pretrained)
-            self.optimizers = self.initOptimizer(optimizer_type, lr, betas, weight_decay)
+            self.opt1, self.opt2, self.opt3 = self.initOptimizer(optimizer_type, lr, betas, weight_decay)
+            self.optimizers = [self.opt1, self.opt2, self.opt3]
             self.schedulers = self.initScheduler(scheduler_type, T_0)
             self.mergeModels(is_init=True, model_path=model_path)
         else:
@@ -103,23 +105,27 @@ class SegmentationTrainingApp:
         return out
 
     def initOptimizer(self, optimizer_type, lr, betas, weight_decay):
+        opt_class = Adam if optimizer_type == 'adam' else AdamW
         if self.swarm_training:
-            if optimizer_type == 'adam':
-                return [Adam(params=model.parameters(), lr=lr, betas=betas) for model in self.models]
-            elif optimizer_type == 'adamw':
-                return [AdamW(params=model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay) for model in self.models]
+            # optims = []
+            # for model in self.models:
+            #     if optimizer_type == 'adam':
+            #         optims.append(Adam(params=model.parameters(), lr=lr, betas=betas))
+            #     elif optimizer_type == 'adamw':
+            #         optims.append(AdamW(params=model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay))
+            opt0 = opt_class(params=self.models[0].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+            opt1 = opt_class(params=self.models[1].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+            opt2 = opt_class(params=self.models[2].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+            return [opt0, opt1, opt2]
         else:
-            if optimizer_type == 'adam':
-                return Adam(params=self.model.parameters(), lr=lr, betas=betas)
-            elif optimizer_type == 'adamw':
-                return AdamW(params=self.model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+            return opt_class(params=self.model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
 
     def initScheduler(self, scheduler_type, T_0):
         if self.swarm_training:
             if scheduler_type == 'cosinewarmre':
-                return [CosineAnnealingWarmRestarts(opt, T_0) for opt in self.optimizers]
+                return [CosineAnnealingWarmRestarts(opt, T_0) for opt in [self.opt1, self.opt2, self.opt3]]
             elif scheduler_type == 'warmupcosine':
-                return [get_cosine_lr_with_linear_warmup(optim=opt, warm_up_epochs=20, T_max=self.T_0-20, eta_min=1e-6) for opt in self.optimizers]
+                return [get_cosine_lr_with_linear_warmup(optim=opt, warm_up_epochs=20, T_max=self.T_0-20, eta_min=1e-6) for opt in [self.opt1, self.opt2, self.opt3]]
         else:
             if scheduler_type == 'cosinewarmre':
                 return CosineAnnealingWarmRestarts(self.optimizer, T_0)
@@ -130,7 +136,8 @@ class SegmentationTrainingApp:
     def initDl(self):
         if self.swarm_training:
             return getSwarmSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size, foreground_pref_chance=self.foreground_pred_chance)
-        return getSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size, foreground_pref_chance=self.foreground_pred_chance)
+        else:
+            return getSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size, foreground_pref_chance=self.foreground_pred_chance)
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
@@ -227,18 +234,27 @@ class SegmentationTrainingApp:
         # trnMetrics = torch.zeros(14, len(train_dl.dataset), device=self.device)
 
         for site, dl in enumerate(train_dl):
-            self.models[site].train()
-            for batch_ndx, batch_tuple in enumerate(dl):
-                self.optimizers[site].zero_grad()
-                loss, _ = self.computeBatchLoss(
-                    self.models[site],
-                    batch_ndx,
-                    batch_tuple,
-                    self.batch_size,
-                    local_metrics[site])
+            mod = self.models[site]
+            if site == 0:
+                opt = self.opt1
+            elif site == 2:
+                opt = self.opt2
+            elif site == 2:
+                opt = self.opt3
+            mod.train()
+            for _ in self.site_repetition[site]:
+                for batch_ndx, batch_tuple in enumerate(dl):
+                    loss, _ = self.computeBatchLoss(
+                        mod,
+                        batch_ndx,
+                        batch_tuple,
+                        self.batch_size,
+                        local_metrics[site])
 
-                loss.backward()
-                self.optimizers[site].step()
+                    loss.backward()
+                    if (batch_ndx + 1) % self.grad_accumulation == 0 or (batch_ndx + 1) == len(train_dl):
+                        opt.step()
+                        opt.zero_grad()
 
         trn_metrics = torch.concat(local_metrics, dim=1)
         self.totalTrainingSamples_count += trn_metrics.shape[1]
@@ -350,9 +366,9 @@ class SegmentationTrainingApp:
             im1 = segmentation_mask[:, :, :, z]
             im2 = segmentation_mask[:, :, y, :]
             im3 = segmentation_mask[:, x, :, :]
-            return loss.mean(), [im1, im2, im3]
+            return loss.sum(), [im1, im2, im3]
         else:
-            return loss.mean(), None
+            return loss.sum(), None
 
     def logMetrics(
         self,
@@ -477,17 +493,20 @@ class SegmentationTrainingApp:
             )
             os.makedirs(os.path.dirname(data_file_path), mode=0o755, exist_ok=True)
 
-            model = self.models[0]
+            if self.swarm_training:
+                model = self.models[0]
+            else:
+                model = self.model
             if isinstance(model, DataParallel):
                 model = model.module
 
             model_state = {
                 'model_state': model.state_dict(),
                 'model_name': type(model).__name__,
-                'optimizer_state': self.optimizers[0].state_dict(),
-                'optimizer_name': type(self.optimizers[0]).__name__,
-                'scheduler_state': self.schedulers[0].state_dict(),
-                'scheduler_name': type(self.schedulers[0]).__name__,
+                'optimizer_state': self.optimizers[0].state_dict() if self.swarm_training else self.optimizer.state_dict(),
+                'optimizer_name': type(self.optimizers[0]).__name__ if self.swarm_training else type(self.optimizer).__name__,
+                'scheduler_state': self.schedulers[0].state_dict() if self.swarm_training else self.scheduler.state_dict(),
+                'scheduler_name': type(self.schedulers[0]).__name__ if self.swarm_training else type(self.scheduler).__name__,
                 'epoch': epoch_ndx,
             }
             data_state = {
