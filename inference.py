@@ -172,3 +172,72 @@ def do_inference_save_results(save_path, image_size, model=None, model_type=None
     for img_ndx in range(pred_stack.shape[0]):
         data[img_ndx] = pred_stack[img_ndx]
     torch.save(data, save_path)
+
+def analyse_results(inference_dict):
+    analysis = {}
+    analysis['good_indices'] = []
+    analysis['bad_indices'] = []
+    analysis['good_indices1'] = []
+    analysis['bad_indices1'] = []
+    analysis['good_indices2'] = []
+    analysis['bad_indices2'] = []
+    analysis['good_indices3'] = []
+    analysis['bad_indices3'] = []
+    img_index = 69
+    f = h5py.File('data/segmentation.hdf5', 'r')
+    comp_list = np.zeros(72)
+    for img_index in range(72):
+        mask = f['val']['mask'][img_index]
+        pred = inference_dict[img_index]
+        prob = np.array(torch.nn.functional.softmax(torch.from_numpy(pred)))
+        class_pred = pred.argmax(axis=0)
+        num_components, postprocessed, postprocessed2, postprocessed3 = postprocess_single_img(class_pred, pred, prob)
+        comp_list[img_index] = num_components if num_components is not None else 0
+        if (mask*class_pred).sum()>0:
+            analysis['good_indices'].append(img_index)
+        else:
+            analysis['bad_indices'].append(img_index)
+        if (mask*postprocessed).sum()>0:
+            analysis['good_indices1'].append(img_index)
+        else:
+            analysis['bad_indices1'].append(img_index)
+        if (mask*postprocessed2).sum()>0:
+            analysis['good_indices2'].append(img_index)
+        else:
+            analysis['bad_indices2'].append(img_index)
+        if (mask*postprocessed3).sum()>0:
+            analysis['good_indices3'].append(img_index)
+        else:
+            analysis['bad_indices3'].append(img_index)
+
+    analysis['int_indices'] = []
+    for ndx, comp_s in enumerate(comp_list):
+        if comp_s != 1:
+            analysis['int_indices'].append([ndx, comp_s])
+    analysis['comp_sizes'] = []
+    for ndx, comp_s in enumerate(inference_dict['comp_sizes']):
+        if len(comp_s) > 1:
+            analysis['comp_sizes'].append([ndx, comp_s])
+
+    analysis['lower_indices'] = []
+    analysis['upper_indices'] = []
+    analysis['lower_dice'] = []
+    analysis['upper_dice'] = []
+    analysis['lower_percentage'] = []
+    analysis['upper_percentage'] = []
+    analysis['lower_number'] = []
+    analysis['upper_number'] = []
+    for threshhold in np.linspace(0., 1., num=11, endpoint=True):
+        lower_indices = np.where(inference_dict['dice_pp_size']<threshhold)
+        analysis['lower_indices'].append(lower_indices)
+        analysis['lower_dice'].append(inference_dict['dice_pp_size'][lower_indices])
+        analysis['lower_number'].append(len(lower_indices[0]))
+        analysis['lower_percentage'].append(len(lower_indices[0])/72)
+
+        upper_indices = np.where(inference_dict['dice_pp_size']>threshhold)
+        analysis['upper_indices'].append(upper_indices)
+        analysis['upper_dice'].append(inference_dict['dice_pp_size'][upper_indices])
+        analysis['upper_number'].append(len(upper_indices[0]))
+        analysis['upper_percentage'].append(len(upper_indices[0])/72)
+
+    return analysis

@@ -33,7 +33,7 @@ class SegmentationTrainingApp:
                  image_size=64, in_channels=1, T_0=2000, section='large',
                  unet_depth=None, pretrained=True, swarm_training=False,
                  model_path=None, grad_accumulation=1, foreground_pref_chance=0.,
-                 swarm_strat='all', site_repetition=[1, 1, 1]):
+                 swarm_strat='all', site_repetition=None, iterations=None):
         
         self.settings = copy.deepcopy(locals())
         del self.settings['self']
@@ -56,6 +56,7 @@ class SegmentationTrainingApp:
         self.model_path = model_path
         self.strategy = swarm_strat
         self.site_repetition = site_repetition
+        self.iterations = [iterations, iterations, iterations] if isinstance(iterations, int) else iterations
 
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
@@ -69,8 +70,7 @@ class SegmentationTrainingApp:
 
         if swarm_training:
             self.models = self.initModel(model_type, swin_type, drop_rate, attn_drop_rate, abs_pos_emb, unet_depth, in_channels, pretrained)
-            self.opt1, self.opt2, self.opt3 = self.initOptimizer(optimizer_type, lr, betas, weight_decay)
-            self.optimizers = [self.opt1, self.opt2, self.opt3]
+            self.optimizers = self.initOptimizer(optimizer_type, lr, betas, weight_decay)
             self.schedulers = self.initScheduler(scheduler_type, T_0)
             self.mergeModels(is_init=True, model_path=model_path)
         else:
@@ -107,25 +107,26 @@ class SegmentationTrainingApp:
     def initOptimizer(self, optimizer_type, lr, betas, weight_decay):
         opt_class = Adam if optimizer_type == 'adam' else AdamW
         if self.swarm_training:
-            # optims = []
-            # for model in self.models:
-            #     if optimizer_type == 'adam':
-            #         optims.append(Adam(params=model.parameters(), lr=lr, betas=betas))
-            #     elif optimizer_type == 'adamw':
-            #         optims.append(AdamW(params=model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay))
-            opt0 = opt_class(params=self.models[0].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
-            opt1 = opt_class(params=self.models[1].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
-            opt2 = opt_class(params=self.models[2].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
-            return [opt0, opt1, opt2]
+            return [opt_class(params=model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay) for model in self.models]
+            # # optims = []
+            # # for model in self.models:
+            # #     if optimizer_type == 'adam':
+            # #         optims.append(Adam(params=model.parameters(), lr=lr, betas=betas))
+            # #     elif optimizer_type == 'adamw':
+            # #         optims.append(AdamW(params=model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay))
+            # opt0 = opt_class(params=self.models[0].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+            # opt1 = opt_class(params=self.models[1].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+            # opt2 = opt_class(params=self.models[2].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+            # return [opt0, opt1, opt2]
         else:
             return opt_class(params=self.model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
 
     def initScheduler(self, scheduler_type, T_0):
         if self.swarm_training:
             if scheduler_type == 'cosinewarmre':
-                return [CosineAnnealingWarmRestarts(opt, T_0) for opt in [self.opt1, self.opt2, self.opt3]]
+                return [CosineAnnealingWarmRestarts(opt, T_0) for opt in self.optimizers]
             elif scheduler_type == 'warmupcosine':
-                return [get_cosine_lr_with_linear_warmup(optim=opt, warm_up_epochs=20, T_max=self.T_0-20, eta_min=1e-6) for opt in [self.opt1, self.opt2, self.opt3]]
+                return [get_cosine_lr_with_linear_warmup(optim=opt, warm_up_epochs=20, T_max=self.T_0-20, eta_min=1e-6) for opt in self.optimizers]
         else:
             if scheduler_type == 'cosinewarmre':
                 return CosineAnnealingWarmRestarts(self.optimizer, T_0)
@@ -161,13 +162,13 @@ class SegmentationTrainingApp:
                 self.mergeModels()
             else:
                 trnMetrics = self.doTraining(train_dl)
-            trn_dice = self.logMetrics(epoch_ndx, 'trn', trnMetrics)
+            self.logMetrics(epoch_ndx, 'trn', trnMetrics)
             
             if epoch_ndx < self.T_0:
                 if self.swarm_training:
                     if self.schedulers is not None:
                         for scheduler in self.schedulers:
-                            scheduler.step
+                            scheduler.step()
                 else:
                     if self.scheduler is not None:
                         self.scheduler.step()
@@ -202,7 +203,7 @@ class SegmentationTrainingApp:
                 )
             )
             os.makedirs(os.path.dirname(save_path), mode=0o755, exist_ok=True)
-            do_inference_save_results(save_path=save_path, model=self.model, image_size=self.image_size, log=False, gaussian_weights=True)
+            do_inference_save_results(save_path=save_path, model=self.models[0] if self.swarm_training else self.model, image_size=self.image_size, log=False, gaussian_weights=True)
 
         if hasattr(self, 'trn_writer'):
             self.trn_writer.close()
@@ -231,30 +232,44 @@ class SegmentationTrainingApp:
 
     def doSwarmTraining(self, train_dl):
         local_metrics = [torch.zeros(13, len(dl.dataset), device=self.device) for dl in train_dl]
-        # trnMetrics = torch.zeros(14, len(train_dl.dataset), device=self.device)
 
         for site, dl in enumerate(train_dl):
-            mod = self.models[site]
-            if site == 0:
-                opt = self.opt1
-            elif site == 2:
-                opt = self.opt2
-            elif site == 2:
-                opt = self.opt3
-            mod.train()
-            for _ in self.site_repetition[site]:
-                for batch_ndx, batch_tuple in enumerate(dl):
-                    loss, _ = self.computeBatchLoss(
-                        mod,
-                        batch_ndx,
-                        batch_tuple,
-                        self.batch_size,
-                        local_metrics[site])
+            model = self.models[site]
+            optim = self.optimizers[site]
+            model.train()
+            if self.iterations is not None:
+                iters = 0
+                while iters < self.iterations[site]:
+                    for batch_ndx, batch_tuple in enumerate(dl):
+                        loss, _ = self.computeBatchLoss(
+                            model,
+                            batch_ndx,
+                            batch_tuple,
+                            self.batch_size,
+                            local_metrics[site])
 
-                    loss.backward()
-                    if (batch_ndx + 1) % self.grad_accumulation == 0 or (batch_ndx + 1) == len(train_dl):
-                        opt.step()
-                        opt.zero_grad()
+                        loss.backward()
+                        if (batch_ndx + 1) % self.grad_accumulation == 0 or (batch_ndx + 1) == len(train_dl):
+                            optim.step()
+                            optim.zero_grad()
+                        iters += 1
+                        if iters >= self.iterations[site]:
+                            break
+            elif self.site_repetition is not None:
+                for _ in range(self.site_repetition[site]):
+                    for batch_ndx, batch_tuple in enumerate(dl):
+                        loss, _ = self.computeBatchLoss(
+                            model,
+                            batch_ndx,
+                            batch_tuple,
+                            self.batch_size,
+                            local_metrics[site])
+
+                        loss.backward()
+                        if (batch_ndx + 1) % self.grad_accumulation == 0 or (batch_ndx + 1) == len(train_dl):
+                            optim.step()
+                            optim.zero_grad()
+
 
         trn_metrics = torch.concat(local_metrics, dim=1)
         self.totalTrainingSamples_count += trn_metrics.shape[1]
@@ -267,7 +282,7 @@ class SegmentationTrainingApp:
             valMetrics = torch.zeros(13, len(val_dl.dataset), device=self.device)
 
             for batch_ndx, batch_tuple in enumerate(val_dl):
-                if batch_ndx == 0:
+                if batch_ndx == 1:
                     need_imgs = True
                 else:
                     need_imgs = False
@@ -292,7 +307,7 @@ class SegmentationTrainingApp:
                 self.models[site].eval()
 
                 for batch_ndx, batch_tuple in enumerate(dl):
-                    if batch_ndx == 0 and site == 0:
+                    if batch_ndx == 1 and site == 0:
                         need_imgs = True
                     else:
                         need_imgs = False
@@ -378,29 +393,38 @@ class SegmentationTrainingApp:
         img_list=None,
     ):
         self.initTensorboardWriters()
+        metrics_dict = self.convert_metrics_to_dict(metrics, 'all')
+        if self.swarm_training:
+            alt_end = 138 if mode_str == 'trn' else 34
+            neu_end = 252 if mode_str == 'trn' else 63
+            metrics_dict.update(self.convert_metrics_to_dict(metrics[:, :alt_end], tag='alt'))
+            metrics_dict.update(self.convert_metrics_to_dict(metrics[:, alt_end:neu_end], tag='neu'))
+            metrics_dict.update(self.convert_metrics_to_dict(metrics[:, neu_end:], tag='asbach'))
 
-        true_pos = metrics[3,:].sum()
-        false_pos = metrics[4,:].sum()
-        false_neg = metrics[5,:].sum()
+        # true_pos = metrics[3,:].sum()
+        # false_pos = metrics[4,:].sum()
+        # false_neg = metrics[5,:].sum()
         
-        epsilon = 1e-5
-        dice_score = (2 * true_pos + epsilon) / (2 * true_pos +  false_pos + false_neg + epsilon)
-        precision = (true_pos + epsilon) / (true_pos + false_pos + epsilon)
-        recall = (true_pos + epsilon) / (true_pos + false_neg + epsilon)
+        # epsilon = 1e-5
+        # dice_score = (2 * true_pos + epsilon) / (2 * true_pos +  false_pos + false_neg + epsilon)
+        # precision = (true_pos + epsilon) / (true_pos + false_pos + epsilon)
+        # recall = (true_pos + epsilon) / (true_pos + false_neg + epsilon)
 
-        metrics_dict = {}
-        metrics_dict['loss/all'] = metrics[0, :].mean()
-        metrics_dict['loss/pos'] = metrics[1, :].mean()
-        metrics_dict['loss/neg'] = metrics[2, :].mean()
-        metrics_dict['overall/dice'] = dice_score
-        metrics_dict['overall/precision'] = precision
-        metrics_dict['overall/recall'] = recall
-        metrics_dict['average/dice'] = metrics[6, :].mean()
-        metrics_dict['average/precision'] = metrics[7, :].mean()
-        metrics_dict['average/recall'] = metrics[8, :].mean()
-        metrics_dict['correct/all'] = metrics[9, :].mean()
-        metrics_dict['correct/pos'] = metrics[10, :].mean()
-        metrics_dict['correct/neg'] = metrics[11, :].mean()
+        # metrics_dict = {}
+        # metrics_dict['loss/all'] = metrics[0, :].mean()
+        # metrics_dict['loss/pos'] = metrics[1, :].mean()
+        # metrics_dict['loss/neg'] = metrics[2, :].mean()
+        # metrics_dict['overall/dice'] = dice_score
+        # metrics_dict['overall/precision'] = precision
+        # metrics_dict['overall/recall'] = recall
+        # metrics_dict['average/dice'] = metrics[6, :].mean()
+        # metrics_dict['average/precision'] = metrics[7, :].mean()
+        # metrics_dict['average/recall'] = metrics[8, :].mean()
+        # metrics_dict['correct/all'] = metrics[9, :].mean()
+        # metrics_dict['correct/pos'] = metrics[10, :].mean()
+        # metrics_dict['correct/neg'] = metrics[11, :].mean()
+
+        dice_score = metrics_dict['overall/dice-all']
 
         writer = getattr(self, mode_str + '_writer')
         for key, value in metrics_dict.items():
@@ -416,7 +440,7 @@ class SegmentationTrainingApp:
         writer.flush()
         return dice_score
     
-    def convert_metrics_to_dict(metrics, tag):
+    def convert_metrics_to_dict(self, metrics, tag):
         true_pos = metrics[3,:].sum()
         false_pos = metrics[4,:].sum()
         false_neg = metrics[5,:].sum()
@@ -473,7 +497,7 @@ class SegmentationTrainingApp:
     def saveModel(self, type_str, epoch_ndx, val_metrics, isBest=False):
         if isBest:
             model_file_path = os.path.join(
-                'saved_models',
+                '/home/hansel/developer/segmentation/saved_models',
                 self.logdir_name,
                 '{}_{}_{}.state'.format(
                     type_str,
@@ -483,7 +507,7 @@ class SegmentationTrainingApp:
             )
             os.makedirs(os.path.dirname(model_file_path), mode=0o755, exist_ok=True)
             data_file_path = os.path.join(
-                'saved_metrics',
+                '/home/hansel/developer/segmentation/saved_metrics',
                 self.logdir_name,
                 '{}_{}_{}.pt'.format(
                     type_str,
