@@ -9,8 +9,8 @@ from batchgenerators.transforms.resample_transforms import SimulateLowResolution
 from batchgenerators.transforms.spatial_transforms import SpatialTransform, MirrorTransform
 from batchgenerators.transforms.utility_transforms import NumpyToTensor
 
-def crop_section_and_aug(image, mask, image_size, pad=30, mode='trn', aug='nnunet', foreground_pref_chance=0.):
-    rng = np.random.default_rng()
+def crop_section_and_aug(image, mask, image_size, pad=30, mode='trn', aug='nnunet', foreground_pref_chance=0., rng_seed=None):
+    rng = np.random.default_rng(rng_seed)
     pref_foreground = rng.uniform() < foreground_pref_chance
     H, W, D = image.shape
     h, w, d = image_size
@@ -39,8 +39,11 @@ def crop_section_and_aug(image, mask, image_size, pad=30, mode='trn', aug='nnune
         mask = data_dict['seg']
     elif aug == 'old':
         image, mask = do_old_aug(rng, image, mask) if mode == 'trn ' else image, mask
-        image = torch.from_numpy(np.expand_dims(image, (0, 1)).copy)
-        mask = torch.from_numpy(np.expand_dims(mask, (0, 1)).copy)
+        image = torch.from_numpy(np.expand_dims(image, (0, 1)).copy())
+        mask = torch.from_numpy(np.expand_dims(mask, (0, 1)).copy())
+    else:
+        image = torch.from_numpy(np.expand_dims(image, (0, 1)).copy())
+        mask = torch.from_numpy(np.expand_dims(mask, (0, 1)).copy())
  
     image = image.squeeze((0, 1))[pad:h+pad, pad:w+pad, pad:d+pad]
     mask = mask.squeeze((0, 1))[pad:h+pad, pad:w+pad, pad:d+pad]
