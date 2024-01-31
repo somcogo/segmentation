@@ -107,17 +107,8 @@ class SegmentationTrainingApp:
     def initOptimizer(self, optimizer_type, lr, betas, weight_decay):
         opt_class = Adam if optimizer_type == 'adam' else AdamW
         if self.swarm_training:
-            return [opt_class(params=model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay) for model in self.models]
-            # # optims = []
-            # # for model in self.models:
-            # #     if optimizer_type == 'adam':
-            # #         optims.append(Adam(params=model.parameters(), lr=lr, betas=betas))
-            # #     elif optimizer_type == 'adamw':
-            # #         optims.append(AdamW(params=model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay))
-            # opt0 = opt_class(params=self.models[0].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
-            # opt1 = opt_class(params=self.models[1].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
-            # opt2 = opt_class(params=self.models[2].parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
-            # return [opt0, opt1, opt2]
+            lr = lr if isinstance(lr, list) else [lr, lr, lr]
+            return [opt_class(params=model.parameters(), lr=lr[ndx], betas=betas, weight_decay=weight_decay) for ndx, model in enumerate(self.models)]
         else:
             return opt_class(params=self.model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
 
@@ -401,29 +392,6 @@ class SegmentationTrainingApp:
             metrics_dict.update(self.convert_metrics_to_dict(metrics[:, alt_end:neu_end], tag='neu'))
             metrics_dict.update(self.convert_metrics_to_dict(metrics[:, neu_end:], tag='asbach'))
 
-        # true_pos = metrics[3,:].sum()
-        # false_pos = metrics[4,:].sum()
-        # false_neg = metrics[5,:].sum()
-        
-        # epsilon = 1e-5
-        # dice_score = (2 * true_pos + epsilon) / (2 * true_pos +  false_pos + false_neg + epsilon)
-        # precision = (true_pos + epsilon) / (true_pos + false_pos + epsilon)
-        # recall = (true_pos + epsilon) / (true_pos + false_neg + epsilon)
-
-        # metrics_dict = {}
-        # metrics_dict['loss/all'] = metrics[0, :].mean()
-        # metrics_dict['loss/pos'] = metrics[1, :].mean()
-        # metrics_dict['loss/neg'] = metrics[2, :].mean()
-        # metrics_dict['overall/dice'] = dice_score
-        # metrics_dict['overall/precision'] = precision
-        # metrics_dict['overall/recall'] = recall
-        # metrics_dict['average/dice'] = metrics[6, :].mean()
-        # metrics_dict['average/precision'] = metrics[7, :].mean()
-        # metrics_dict['average/recall'] = metrics[8, :].mean()
-        # metrics_dict['correct/all'] = metrics[9, :].mean()
-        # metrics_dict['correct/pos'] = metrics[10, :].mean()
-        # metrics_dict['correct/neg'] = metrics[11, :].mean()
-
         dice_score = metrics_dict['overall/dice-all']
 
         writer = getattr(self, mode_str + '_writer')
@@ -431,7 +399,6 @@ class SegmentationTrainingApp:
             writer.add_scalar(key, value, global_step=epoch_ndx)
         if img_list is not None:
             for ndx in range(3):
-                # grid = make_grid(img_list[3*ndx: 3*(ndx+1)], nrow=3)
                 writer.add_image('images/{}'.format(ndx),
                     img_list[ndx],
                     global_step=epoch_ndx,
