@@ -383,6 +383,8 @@ class SegmentationTrainingApp:
         metrics,
         img_list=None,
     ):
+        if epoch_ndx == 1 and mode_str == 'val':
+            log.info('Image list received: {}'.format(img_list == None))
         self.initTensorboardWriters()
         metrics_dict = self.convert_metrics_to_dict(metrics, 'all')
         if self.swarm_training:
