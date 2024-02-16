@@ -127,24 +127,24 @@ def do_inference_on_val_ds(model, section_size, device, keep_masks=False, log=Fa
     img_ds = inf_file['val']['img']
     mask_ds = inf_file['val']['mask']
     if img_number is None:
-        img_number = img_ds.shape[0]
+        img_number = [0, img_ds.shape[0]]
 
     N, H, W, D = img_ds.shape
-    pred_class_stack = np.zeros((img_number, H, W, D))
-    pred_stack = np.zeros((img_number, 2, H, W, D))
-    prob_stack = np.zeros((img_number, 2, H, W, D))
-    for img_index in range(img_number):
+    pred_class_stack = np.zeros((img_number[1]-img_number[0], H, W, D))
+    pred_stack = np.zeros((img_number[1]-img_number[0], 2, H, W, D))
+    prob_stack = np.zeros((img_number[1]-img_number[0], 2, H, W, D))
+    for img_index in range(img_number[0], img_number[1]):
         img = torch.from_numpy(np.array(img_ds[img_index])).unsqueeze(0).unsqueeze(0)
         pred_class, pred, prob = inference(img, model, section_size, device, gaussian_weights=gaussian_weights, overlap=overlap)
 
-        pred_class_stack[img_index] = pred_class.detach().cpu()
-        pred_stack[img_index] = pred.detach().cpu()
-        prob_stack[img_index] = prob.detach().cpu()
+        pred_class_stack[img_index-img_number[0]] = pred_class.detach().cpu()
+        pred_stack[img_index-img_number[0]] = pred.detach().cpu()
+        prob_stack[img_index-img_number[0]] = prob.detach().cpu()
         
         if log:
-            print('scan', img_index, '/', img_number)
+            print('scan', img_index-img_number[0], '/', img_number[1]-img_number[0])
 
-    mask = np.array(mask_ds[:img_number])
+    mask = np.array(mask_ds[img_number[0]:img_number[1]])
     comp_size_per_img, postprocessed, postprocessed2, postprocessed3 = postprocess(pred_class_stack, pred_stack, prob_stack)
     dice0 = calculate_dice(pred_class_stack, mask)
     dice1 = calculate_dice(postprocessed, mask)
@@ -163,7 +163,8 @@ def do_inference_save_results(save_path, image_size, model=None, model_type=None
         model.load_state_dict(state_dict)
 
     dice0, dice1, dice2, dice3, pred_stack, pred_class_stack, comp_size_per_img, postprocessed, postprocessed2, postprocessed3 = do_inference_on_val_ds(model, image_size, device, keep_masks=True, log=log, gaussian_weights=gaussian_weights, overlap=overlap, img_number=img_number)
-
+    if log:
+        print('Inference done, starting saving')
     data = {'dice':dice0,
             'dice_pp_size':dice1,
             'dice_pp_logit':dice2,

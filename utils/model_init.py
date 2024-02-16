@@ -41,7 +41,7 @@ def model_init(model_type, swin_type=None, image_size=None, drop_rate=None, attn
     elif model_type == 'monaiswin':
         model = MonaiSwin(img_size=image_size, in_channels=in_channels, out_channels=2, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24], feature_size=48, spatial_dims=3)
         if pretrained:
-            swin_weights = torch.load('/home/hansel/developer/segmentation/data/model_swinvit.pt')
+            swin_weights = torch.load('data/model_swinvit.pt')
             model.load_from(swin_weights)
     elif model_type == 'unet':
         model = UNet(in_channels=in_channels, n_classes=2, depth=unet_depth, wf=6, padding=True, batch_norm=True, up_mode='upsample')
