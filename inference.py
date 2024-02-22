@@ -86,11 +86,11 @@ def compute_gaussian(tile_size : tuple, sigma_scale: float = 1. / 8,
 def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=False, overlap=None):
     model = model.to(device)
     model.eval()
-    img = img.to(device)
+    img = img
     H, W, D = img.shape[-3:]
-    pred = torch.zeros((1, 2, H, W, D), device=device)
-    n_predictions = torch.zeros((H, W, D), device=device)
-    gaussian = compute_gaussian(tile_size=tuple(section_size), device=device) if gaussian_weights else None
+    pred = torch.zeros((1, 2, H, W, D), device='cpu')
+    n_predictions = torch.zeros((H, W, D), device='cpu')
+    gaussian = compute_gaussian(tile_size=tuple(section_size), device='cpu') if gaussian_weights else None
     # prob = torch.zeros((1, H, W, D), device=device)
     # prob2 = torch.zeros((1, 2, H, W, D), device=device)
     model.eval()
@@ -108,10 +108,12 @@ def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=Fa
         for y_c in y_coords:
             for z_c in z_coords:
                 patch = img[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z]
+                patch = patch.to(device)
                 temp1 = model(patch)
-                pred[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp1.detach() * gaussian if gaussian_weights else temp1.detach()
+                temp1 = temp1.detach().cpu()
+                pred[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp1 * gaussian if gaussian_weights else temp1
                 n_predictions[x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += gaussian if gaussian_weights else 1
-                del temp1
+                del temp1, patch
                 # prob2[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp2
                 # temp_prob = temp2.argmax(dim=1)
                 # if temp_prob.max() > 0:
