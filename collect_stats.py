@@ -30,8 +30,8 @@ def get_spacing_px_count(dcm_path):
         px_count[:len(count)] += count
         z_list.append(dcm_ds.SliceLocation)
     z_list.sort()
-    spacing[0] = z_list[1] - z_list[0]
-    spacing[1:] = dcm_ds.PixelSpacing
+    spacing[2] = z_list[1] - z_list[0]
+    spacing[:2] = dcm_ds.PixelSpacing
 
     return spacing, px_count
 
