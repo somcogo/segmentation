@@ -244,3 +244,26 @@ def analyse_results(inference_dict):
         analysis['upper_percentage'].append(len(upper_indices[0])/72)
 
     return analysis
+
+def postprocess_to_single_comp(pred_class):
+    if pred_class.sum() > 0:
+        labelled_components, num_components = ndimage.label(pred_class)
+        comp_sizes = np.zeros((num_components))
+        if num_components > 0:
+            for comp in range(1, num_components+1):
+                comp_sizes[comp-1] = (labelled_components == comp).sum()
+            largest_comp = comp_sizes.argmax() + 1
+            postprocessed = labelled_components == largest_comp
+    else:
+        postprocessed = np.zeros_like(pred_class)
+
+    return postprocessed
+
+def threshholds_strict(pred, mask, thresholds):
+    prob = np.exp(pred) / np.sum(np.exp(pred), axis=0)[1]
+    dices = np.zeros_like(thresholds)
+    for i, th in enumerate(thresholds):
+        post = postprocess_to_single_comp(prob > th)
+        dices[i] = 2*(post * mask).sum()/(post.sum() + mask.sum())
+
+    return dices
