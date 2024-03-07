@@ -14,7 +14,7 @@ def crop_section_and_aug(image, mask, image_size, pad=30, mode='trn', aug='nnune
     pref_foreground = rng.uniform() < foreground_pref_chance
     H, W, D = image.shape
     h, w, d = image_size
-    if pref_foreground:
+    if pref_foreground and mask.sum() > 0:
         x_c, y_c, z_c = [arr.mean().astype(np.longlong) for arr in np.where(mask)]
         x_low, x_high = max(0, x_c - h), min(H - h, x_c)
         y_low, y_high = max(0, y_c - w), min(W - w, y_c)
