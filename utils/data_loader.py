@@ -12,7 +12,7 @@ class NewSegmentationDataset(Dataset):
     def __init__(self, data_path, mode, aug='nnunet', section='random', image_size=None, foreground_pref_chance=0., rng_seed=None):
         super().__init__()
         self.data_path = data_path
-        self.img_ids = [os.path.basename(p).split('.')[0] for p in glob.glob(data_path)]
+        self.img_ids = [os.path.basename(p).split('.')[0] for p in glob.glob(os.path.join(data_path, mode, 'img', '*'))]
         self.img_ids.sort()
         self.aug = aug
         self.section = section
@@ -25,9 +25,9 @@ class NewSegmentationDataset(Dataset):
         return len(self.img_ids)
     
     def __getitem__(self, index):
-        image = np.load(os.path.join(self.data_path, 'img', self.img_ids[index] + '.npy'))
+        image = np.load(os.path.join(self.data_path, self.mode, 'img', self.img_ids[index] + '.npy'))
         try:
-            mask = np.load(os.path.join(self.data_path, 'mask', self.img_ids[index] + '-labels.npy'))
+            mask = np.load(os.path.join(self.data_path, self.mode, 'mask', self.img_ids[index] + '-labels.npy'))
         except:
             mask = np.zeros_like(image)
         image, mask = crop_section_and_aug(image, mask, self.image_size, mode=self.mode, aug=self.aug, foreground_pref_chance=self.foreground_pref_chance, rng_seed=self.rng_seed)
@@ -110,18 +110,30 @@ class SwarmSegmentationDataset(Dataset):
         image, mask = crop_section_and_aug(image, mask, self.image_size, mode=self.mode, aug=self.aug, foreground_pref_chance=self.foreground_pref_chance, rng_seed=self.rng_seed)
         return image.unsqueeze(0), mask.unsqueeze(0)
 
-def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='new'):
-    ds_class = SegmentationDataset if dataset != 'new' else NewSegmentationDataset
-    trn_ds = ds_class(data_path='/home/hansel/developer/segmentation/data', mode='trn', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
-    val_ds = ds_class(data_path='/home/hansel/developer/segmentation/data', mode='val', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
+def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='111'):
+    ds_class = SegmentationDataset if dataset == 'old' else NewSegmentationDataset
+    if dataset == '111':
+        data_path = '/home/hansel/developer/segmentation/data/spacing111'
+    elif dataset == 'median':
+        data_path = '/home/hansel/developer/segmentation/data/median_spacing'
+    else:
+        data_path = '/home/hansel/developer/segmentation/data'
+    trn_ds = ds_class(data_path, mode='trn', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
+    val_ds = ds_class(data_path, mode='val', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
     trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True)
     return trn_dl, val_dl
 
-def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='new'):
-    ds_class = SwarmSegmentationDataset if dataset != 'new' else NewSwarmSegmentationDataset
-    trn_ds_list = [ds_class('/home/hansel/developer/segmentation/data', 'trn', site, aug, section, image_size=image_size, foreground_pref_chance=foreground_pref_chance) for site in ['alt', 'neu', 'asbach']]
-    val_ds_list = [ds_class('/home/hansel/developer/segmentation/data', 'val', site, False, section, image_size=image_size, foreground_pref_chance=foreground_pref_chance) for site in ['alt', 'neu', 'asbach']]
+def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='111'):
+    ds_class = SwarmSegmentationDataset if dataset == 'old' else NewSwarmSegmentationDataset
+    if dataset == '111':
+        data_path = '/home/hansel/developer/segmentation/data/spacing111'
+    elif dataset == 'median':
+        data_path = '/home/hansel/developer/segmentation/data/median_spacing'
+    else:
+        data_path = '/home/hansel/developer/segmentation/data'
+    trn_ds_list = [ds_class(data_path, 'trn', site, aug, section, image_size=image_size, foreground_pref_chance=foreground_pref_chance) for site in ['alt', 'neu', 'asbach']]
+    val_ds_list = [ds_class(data_path, 'val', site, False, section, image_size=image_size, foreground_pref_chance=foreground_pref_chance) for site in ['alt', 'neu', 'asbach']]
     trn_dl_list = [DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True, persistent_workers=True) for trn_ds in trn_ds_list]
     val_dl_list = [DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True, persistent_workers=True) for val_ds in val_ds_list]
     return trn_dl_list, val_dl_list

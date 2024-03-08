@@ -33,7 +33,8 @@ class SegmentationTrainingApp:
                  image_size=64, in_channels=1, T_0=2000, section='large',
                  unet_depth=None, pretrained=True, swarm_training=False,
                  model_path=None, grad_accumulation=1, foreground_pref_chance=0.,
-                 swarm_strat='all', site_repetition=None, iterations=None):
+                 swarm_strat='all', site_repetition=None, iterations=None,
+                 dataset='111'):
         
         self.settings = copy.deepcopy(locals())
         del self.settings['self']
@@ -57,6 +58,7 @@ class SegmentationTrainingApp:
         self.strategy = swarm_strat
         self.site_repetition = site_repetition
         self.iterations = [iterations, iterations, iterations] if isinstance(iterations, int) else iterations
+        self.dataset = dataset
 
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
@@ -127,9 +129,9 @@ class SegmentationTrainingApp:
 
     def initDl(self):
         if self.swarm_training:
-            return getSwarmSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size, foreground_pref_chance=self.foreground_pred_chance)
+            return getSwarmSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size, foreground_pref_chance=self.foreground_pred_chance, dataset=self.dataset)
         else:
-            return getSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size, foreground_pref_chance=self.foreground_pred_chance)
+            return getSegmentationDataLoader(batch_size=self.batch_size, aug=self.aug, section=self.section, image_size=self.image_size, foreground_pref_chance=self.foreground_pred_chance, dataset=self.dataset)
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
