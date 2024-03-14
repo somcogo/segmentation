@@ -37,7 +37,7 @@ class NewSwarmSegmentationDataset(Dataset):
     def __init__(self, data_path, mode, site, aug='nnunet', section='random', image_size=None, foreground_pref_chance=0., rng_seed=None):
         super().__init__()
         self.data_path = data_path
-        self.img_ids = torch.load('data/seg_retrain_id_data.pt')[mode][site]
+        self.img_ids = torch.load('/home/hansel/developer/segmentation/data/seg_retrain_id_data.pt')[mode][site]
         self.img_ids.sort()
         self.aug = aug
         self.section = section
@@ -51,12 +51,13 @@ class NewSwarmSegmentationDataset(Dataset):
         return len(self.img_ids)
     
     def __getitem__(self, index):
-        image = np.load(os.path.join(self.data_path, 'img', self.img_ids[index] + '.npy'))
+        image = np.load(os.path.join(self.data_path, self.mode, 'img', self.img_ids[index] + '.npy'))
         try:
-            mask = np.load(os.path.join(self.data_path, 'mask', self.img_ids[index] + '-labels.npy'))
+            mask = np.load(os.path.join(self.data_path, self.mode, 'mask', self.img_ids[index] + '-labels.npy'))
         except:
             mask = np.zeros_like(image)
         image, mask = crop_section_and_aug(image, mask, self.image_size, mode=self.mode, aug=self.aug, foreground_pref_chance=self.foreground_pref_chance, rng_seed=self.rng_seed)
+        mask = mask > 0
         return image.unsqueeze(0), mask.unsqueeze(0)
 
 class SegmentationDataset(Dataset):
@@ -120,8 +121,8 @@ def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_
         data_path = '/home/hansel/developer/segmentation/data'
     trn_ds = ds_class(data_path, mode='trn', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
     val_ds = ds_class(data_path, mode='val', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
-    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
-    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True)
+    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True, persistent_workers=True)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True, persistent_workers=True)
     return trn_dl, val_dl
 
 def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='111'):
