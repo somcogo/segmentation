@@ -381,7 +381,7 @@ class SegmentationTrainingApp:
 
     def computeBatchLoss(self, model, batch_ndx, batch_tup, batch_size, metrics, need_imgs=False):
         batch, masks = batch_tup
-        batch = batch.to(device=self.device, non_blocking=True)
+        batch = batch.to(device=self.device, non_blocking=True).float()
         masks = masks.to(device=self.device, non_blocking=True).long()
         if 'mednext' in self.model_type or 'monai' in self.model_type:
             prediction = model(batch)
