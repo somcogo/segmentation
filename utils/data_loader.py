@@ -3,7 +3,7 @@ import glob
 
 import h5py
 import numpy as np
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, DistributedSampler
 import torch
 
 from utils.ops import crop_section_and_aug
@@ -37,7 +37,7 @@ class NewSwarmSegmentationDataset(Dataset):
     def __init__(self, data_path, mode, site, aug='nnunet', section='random', image_size=None, foreground_pref_chance=0., rng_seed=None):
         super().__init__()
         self.data_path = data_path
-        self.img_ids = torch.load('data/seg_retrain_id_data.pt')[mode][site]
+        self.img_ids = torch.load('/home/hansel/developer/segmentation/data/seg_retrain_id_data.pt')[mode][site]
         self.img_ids.sort()
         self.aug = aug
         self.section = section
@@ -51,12 +51,13 @@ class NewSwarmSegmentationDataset(Dataset):
         return len(self.img_ids)
     
     def __getitem__(self, index):
-        image = np.load(os.path.join(self.data_path, 'img', self.img_ids[index] + '.npy'))
+        image = np.load(os.path.join(self.data_path, self.mode, 'img', self.img_ids[index] + '.npy'))
         try:
-            mask = np.load(os.path.join(self.data_path, 'mask', self.img_ids[index] + '-labels.npy'))
+            mask = np.load(os.path.join(self.data_path, self.mode, 'mask', self.img_ids[index] + '-labels.npy'))
         except:
             mask = np.zeros_like(image)
         image, mask = crop_section_and_aug(image, mask, self.image_size, mode=self.mode, aug=self.aug, foreground_pref_chance=self.foreground_pref_chance, rng_seed=self.rng_seed)
+        mask = mask > 0
         return image.unsqueeze(0), mask.unsqueeze(0)
 
 class SegmentationDataset(Dataset):
@@ -110,7 +111,7 @@ class SwarmSegmentationDataset(Dataset):
         image, mask = crop_section_and_aug(image, mask, self.image_size, mode=self.mode, aug=self.aug, foreground_pref_chance=self.foreground_pref_chance, rng_seed=self.rng_seed)
         return image.unsqueeze(0), mask.unsqueeze(0)
 
-def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='111'):
+def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='111', distr=None):
     ds_class = SegmentationDataset if dataset == 'old' else NewSegmentationDataset
     if dataset == '111':
         data_path = '/home/hansel/developer/segmentation/data/spacing111'
@@ -120,11 +121,13 @@ def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_
         data_path = '/home/hansel/developer/segmentation/data'
     trn_ds = ds_class(data_path, mode='trn', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
     val_ds = ds_class(data_path, mode='val', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
-    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
-    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True)
-    return trn_dl, val_dl
+    trn_sampler = None if distr is None else DistributedSampler(trn_ds)
+    val_sampler = None if distr is None else DistributedSampler(val_ds)
+    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=(trn_sampler is None), sampler=trn_sampler, num_workers=4, pin_memory=True)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, sampler=val_sampler, num_workers=4, pin_memory=True)
+    return trn_dl, val_dl, trn_sampler, val_sampler
 
-def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='111'):
+def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='111', distr=None):
     ds_class = SwarmSegmentationDataset if dataset == 'old' else NewSwarmSegmentationDataset
     if dataset == '111':
         data_path = '/home/hansel/developer/segmentation/data/spacing111'
@@ -134,9 +137,11 @@ def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random', image
         data_path = '/home/hansel/developer/segmentation/data'
     trn_ds_list = [ds_class(data_path, 'trn', site, aug, section, image_size=image_size, foreground_pref_chance=foreground_pref_chance) for site in ['alt', 'neu', 'asbach']]
     val_ds_list = [ds_class(data_path, 'val', site, False, section, image_size=image_size, foreground_pref_chance=foreground_pref_chance) for site in ['alt', 'neu', 'asbach']]
-    trn_dl_list = [DataLoader(trn_ds, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True, persistent_workers=True) for trn_ds in trn_ds_list]
-    val_dl_list = [DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True, persistent_workers=True) for val_ds in val_ds_list]
-    return trn_dl_list, val_dl_list
+    trn_sampler_list = [None if distr is None else DistributedSampler(ds) for ds in trn_ds_list]
+    val_sampler_list = [None if distr is None else DistributedSampler(ds) for ds in val_ds_list]
+    trn_dl_list = [DataLoader(ds, batch_size=batch_size, shuffle=(sampler is None), sampler=sampler, num_workers=4, pin_memory=True, persistent_workers=True) for ds, sampler in zip(trn_ds_list, trn_sampler_list)]
+    val_dl_list = [DataLoader(ds, batch_size=batch_size, shuffle=False, sampler=sampler, num_workers=4, pin_memory=True, persistent_workers=True) for ds, sampler in zip(val_ds_list, val_sampler_list)]
+    return trn_dl_list, val_dl_list, trn_sampler_list, val_sampler_list
 
 # class DatasetV2(Dataset):
 #     def __init__(self, data_path, mode, aug=False, section='large'):
