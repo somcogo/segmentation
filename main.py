@@ -183,9 +183,10 @@ class SegmentationTrainingApp:
             else:
                 trnMetrics = self.doTraining(trn_dl)
 
-            if self.main_process:
+            if self.distr is not None:
                 dist.reduce(trnMetrics, op=dist.ReduceOp.SUM, dst=0)
-                trnMetrics = trnMetrics.to('cpu') if self.distr is None else trnMetrics.to('cpu') / self.distr['world_size']
+            trnMetrics = trnMetrics.to('cpu') if self.distr is None else trnMetrics.to('cpu') / self.distr['world_size']
+            if self.main_process:
                 self.logMetrics(epoch_ndx, 'trn', trnMetrics)
             
             if epoch_ndx < self.T_0:
@@ -203,9 +204,9 @@ class SegmentationTrainingApp:
                 else:
                     valMetrics, val_loss, imgs = self.doValidation(val_dl)
 
+                dist.reduce(valMetrics, op=dist.ReduceOp.SUM, dst=0)
+                valMetrics = valMetrics.to('cpu') if self.distr is None else trnMetrics.to('cpu') / self.distr['world_size']
                 if self.main_process:
-                    dist.reduce(valMetrics, op=dist.ReduceOp.SUM, dst=0)
-                    valMetrics = valMetrics.to('cpu') if self.distr is None else trnMetrics.to('cpu') / self.distr['world_size']
                     val_dice = self.logMetrics(epoch_ndx, 'val', valMetrics, imgs)
                     val_best = max(val_dice, val_best)
 
@@ -218,8 +219,6 @@ class SegmentationTrainingApp:
                             val_loss,
                             val_dice,
                         ))
-            if self.distr is not None:
-                dist.barrier()
 
         if self.epochs > 100 and self.main_process:
             log.info('Training finished. Performing inference on validation set')
@@ -250,11 +249,14 @@ class SegmentationTrainingApp:
                 batch_tuple,
                 self.batch_size,
                 trnMetrics)
+            
 
             loss.backward()
             if (batch_ndx + 1) % self.grad_accumulation == 0 or (batch_ndx + 1) == len(train_dl):
                 self.optimizer.step()
                 self.optimizer.zero_grad()
+            if batch_ndx == 2:
+                break
 
         self.totalTrainingSamples_count += len(train_dl.dataset)
 
@@ -326,7 +328,8 @@ class SegmentationTrainingApp:
                 )
                 if imgs is not None:
                     imgs_to_save = imgs
-
+                if batch_ndx == 2:
+                    break
         return valMetrics, val_loss, imgs_to_save
 
     def doSwarmValidation(self, val_dl):

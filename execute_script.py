@@ -17,12 +17,12 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 # log.setLevel(logging.DEBUG)
 
-epochs = 2
+epochs = 5
 batch_size = 2
 grad_acc = 2
 foreground_chance = 0.5
 image_size = 128
-dataset = '111'
+dataset = 'median'
 comm = 'test'
 logdir = 'test'
 
@@ -57,16 +57,15 @@ def get_config(arg):
     return config
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0, 6"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "6, 7"
     torch.set_num_threads(2)
     parser = argparse.ArgumentParser(description="Train a model with or without distributed training.")
     parser.add_argument("--dist", default=False, type=bool, help="Run distributed training")
     parser.add_argument("--config", default='medcent', type=str, help="Config to use")
     args = parser.parse_args()
 
-    print(args)
     config = get_config(args.config)
-    print(args)
+    
     if args.dist:
         run_distr_training(config)
     else:
