@@ -116,15 +116,15 @@ def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_
     if dataset == '111':
         data_path = '/home/hansel/developer/segmentation/data/spacing111'
     elif dataset == 'median':
-        data_path = '/home/hansel/developer/segmentation/data/median_spacing'
+        data_path = '/home/hansel/developer/segmentation/data/medianspacing'
     else:
         data_path = '/home/hansel/developer/segmentation/data'
     trn_ds = ds_class(data_path, mode='trn', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
     val_ds = ds_class(data_path, mode='val', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
     trn_sampler = None if distr is None else DistributedSampler(trn_ds)
     val_sampler = None if distr is None else DistributedSampler(val_ds)
-    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=(trn_sampler is None), sampler=trn_sampler, num_workers=4, pin_memory=True)
-    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, sampler=val_sampler, num_workers=4, pin_memory=True)
+    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=(trn_sampler is None), sampler=trn_sampler, num_workers=0, pin_memory=True)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, sampler=val_sampler, num_workers=0, pin_memory=True)
     return trn_dl, val_dl, trn_sampler, val_sampler
 
 def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='111', distr=None):
@@ -139,8 +139,8 @@ def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random', image
     val_ds_list = [ds_class(data_path, 'val', site, False, section, image_size=image_size, foreground_pref_chance=foreground_pref_chance) for site in ['alt', 'neu', 'asbach']]
     trn_sampler_list = [None if distr is None else DistributedSampler(ds) for ds in trn_ds_list]
     val_sampler_list = [None if distr is None else DistributedSampler(ds) for ds in val_ds_list]
-    trn_dl_list = [DataLoader(ds, batch_size=batch_size, shuffle=(sampler is None), sampler=sampler, num_workers=4, pin_memory=True, persistent_workers=True) for ds, sampler in zip(trn_ds_list, trn_sampler_list)]
-    val_dl_list = [DataLoader(ds, batch_size=batch_size, shuffle=False, sampler=sampler, num_workers=4, pin_memory=True, persistent_workers=True) for ds, sampler in zip(val_ds_list, val_sampler_list)]
+    trn_dl_list = [DataLoader(ds, batch_size=batch_size, shuffle=(sampler is None), sampler=sampler, num_workers=0, pin_memory=True, persistent_workers=True) for ds, sampler in zip(trn_ds_list, trn_sampler_list)]
+    val_dl_list = [DataLoader(ds, batch_size=batch_size, shuffle=False, sampler=sampler, num_workers=0, pin_memory=True, persistent_workers=True) for ds, sampler in zip(val_ds_list, val_sampler_list)]
     return trn_dl_list, val_dl_list, trn_sampler_list, val_sampler_list
 
 # class DatasetV2(Dataset):
