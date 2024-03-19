@@ -256,8 +256,6 @@ class SegmentationTrainingApp:
             if (batch_ndx + 1) % self.grad_accumulation == 0 or (batch_ndx + 1) == len(train_dl):
                 self.optimizer.step()
                 self.optimizer.zero_grad()
-            if batch_ndx == 2:
-                break
 
         self.totalTrainingSamples_count += len(train_dl.dataset)
 
@@ -329,8 +327,6 @@ class SegmentationTrainingApp:
                 )
                 if imgs is not None:
                     imgs_to_save = imgs
-                if batch_ndx == 2:
-                    break
         return valMetrics, val_loss, imgs_to_save
 
     def doSwarmValidation(self, val_dl):
