@@ -17,12 +17,12 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 # log.setLevel(logging.DEBUG)
 
-epochs = 5
+epochs = 50
 batch_size = 2
-grad_acc = 2
+grad_acc = 8//batch_size
 foreground_chance = 0.5
 image_size = 128
-dataset = 'median'
+dataset = '111'
 comm = 'test'
 logdir = 'test'
 

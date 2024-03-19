@@ -125,6 +125,7 @@ class SegmentationTrainingApp:
                 if torch.cuda.device_count() > 1:
                     model = DistributedDataParallel(model.to(self.device), device_ids=[self.distr['rank']], broadcast_buffers=False, find_unused_parameters=True)
                 model = model.to(self.device)
+                # model = torch.compile(model)
         param_num = sum(p.numel() for p in model.parameters())
         if self.main_process:
             log.info('Initiated model with {} params'.format(param_num))
