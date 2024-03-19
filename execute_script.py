@@ -1,60 +1,32 @@
 import os
-import glob
-import time
 import argparse
 
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.utils.tensorboard import SummaryWriter
 
 from main import SegmentationTrainingApp
 from utils.logconf import logging
-from distr_training import run_distr_training
+from config import get_config
 
-log = logging.getLogger(__name__)
-# log.setLevel(logging.WARN)
-log.setLevel(logging.INFO)
-# log.setLevel(logging.DEBUG)
+def run(rank, world_size, config):
+    dist.init_process_group("NCCL", rank=rank, world_size=world_size)
+    torch.cuda.device(rank)
+    dist_arg = {'rank':rank,
+                'world_size':world_size}
+    trainer = SegmentationTrainingApp(distr=dist_arg, **config)
+    trainer.main()
 
-epochs = 50
-batch_size = 2
-grad_acc = 8//batch_size
-foreground_chance = 0.5
-image_size = 128
-dataset = '111'
-comm = 'test'
-logdir = 'test'
+    dist.destroy_process_group()
 
-med_cent_config = {'epochs':epochs,
-          'logdir':logdir,
-          'lr':1e-3,
-          'batch_size':batch_size,
-          'loss_fn':'XE',
-          'XEweight':1,
-          'optimizer_type':'adamw',
-          'weight_decay':1e-5,
-          'model_type':'mednext-s',
-          'aug':'nnunet',
-          'grad_accumulation':grad_acc,
-          'foreground_pref_chance':foreground_chance,
-          'image_size':image_size,
-          'swarm_training':False,
-          'scheduler_type':'warmupcosine',
-          'T_0':epochs,
-          'section':'random',
-          'site_repetition':None,
-          'iterations':None,
-          'betas':(0.5, 0.9),
-          'dataset':dataset,
-          'comment':f'{comm}-mednext-s-e{epochs}-T{epochs}-b{batch_size}-lr1e-3-XE1-adamw-augnnunet-imgsize-{image_size}-foregroundchance-{foreground_chance}-gradacc-{grad_acc}-swarm-True-siterep-None-iters-None-beta-(0.5,0.9)-dataset-{dataset}'.replace(' ', '')}
-
-def get_config(arg):
-    match arg:
-        case 'medcent':
-            config = med_cent_config
-
-    return config
+def run_distr_training(config):
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "29500"
+    world_size = 2
+    mp.spawn(run,
+        args=(world_size, config),
+        nprocs=world_size,
+        join=True)
 
 if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = "6, 7"
