@@ -123,8 +123,8 @@ def getSegmentationDataLoader(batch_size, aug='nnunet', section='random', image_
     val_ds = ds_class(data_path, mode='val', aug=aug, section=section, image_size=image_size, foreground_pref_chance=foreground_pref_chance)
     trn_sampler = None if distr is None else DistributedSampler(trn_ds)
     val_sampler = None if distr is None else DistributedSampler(val_ds)
-    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=(trn_sampler is None), sampler=trn_sampler, num_workers=0, pin_memory=True)
-    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, sampler=val_sampler, num_workers=0, pin_memory=True)
+    trn_dl = DataLoader(trn_ds, batch_size=batch_size, shuffle=(trn_sampler is None), sampler=trn_sampler, num_workers=4, pin_memory=True)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, sampler=val_sampler, num_workers=4, pin_memory=True)
     return trn_dl, val_dl, trn_sampler, val_sampler
 
 def getSwarmSegmentationDataLoader(batch_size, aug=True, section='random', image_size=(64, 64, 64), foreground_pref_chance=0., dataset='111', distr=None):
