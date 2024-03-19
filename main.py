@@ -329,8 +329,6 @@ class SegmentationTrainingApp:
                 )
                 if imgs is not None:
                     imgs_to_save = imgs
-                if batch_ndx == 2:
-                    break
         return valMetrics, val_loss, imgs_to_save
 
     def doSwarmValidation(self, val_dl):
