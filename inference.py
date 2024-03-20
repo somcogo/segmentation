@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 
 import torch
@@ -115,11 +116,6 @@ def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=Fa
                 pred[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp1 * gaussian if gaussian_weights else temp1
                 n_predictions[x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += gaussian if gaussian_weights else 1
                 del temp1, patch
-                # prob2[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp2
-                # temp_prob = temp2.argmax(dim=1)
-                # if temp_prob.max() > 0:
-                #     print(x_c, y_c, z_c)
-                # prob[:, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp_prob
     pred /= n_predictions
     pred_class = pred.argmax(dim=1)
 
@@ -231,14 +227,14 @@ def analyse_results(inference_dict):
     analysis['upper_percentage'] = []
     analysis['lower_number'] = []
     analysis['upper_number'] = []
-    for threshhold in np.linspace(0., 1., num=11, endpoint=True):
-        lower_indices = np.where(inference_dict['dice_pp_size']<threshhold)
+    for threshold in np.linspace(0., 1., num=11, endpoint=True):
+        lower_indices = np.where(inference_dict['dice_pp_size']<threshold)
         analysis['lower_indices'].append(lower_indices)
         analysis['lower_dice'].append(inference_dict['dice_pp_size'][lower_indices])
         analysis['lower_number'].append(len(lower_indices[0]))
         analysis['lower_percentage'].append(len(lower_indices[0])/72)
 
-        upper_indices = np.where(inference_dict['dice_pp_size']>threshhold)
+        upper_indices = np.where(inference_dict['dice_pp_size']>threshold)
         analysis['upper_indices'].append(upper_indices)
         analysis['upper_dice'].append(inference_dict['dice_pp_size'][upper_indices])
         analysis['upper_number'].append(len(upper_indices[0]))
@@ -260,7 +256,18 @@ def postprocess_to_single_comp(pred_class):
 
     return postprocessed
 
-def threshholds_strict(pred, mask, thresholds):
+def get_neg_thresholds(paths, model, section_size=[128, 128, 128], device='cuda'):
+    pred_max = np.zeros((len(paths)))
+    for path_i, path in enumerate(paths):
+        img = np.load(path)
+        _, pred, _ = inference(img, model=model, section_size=section_size, device=device, gaussian_weights=True)
+        pred = pred.squeeze()
+        e_pred = np.exp(pred - pred.min(axis=0))
+        prob = (e_pred / np.sum(e_pred, axis=0, keepdims=True))[1]
+        pred_max[path_i] = prob.max()
+    return pred_max
+
+def thresholds_strict(pred, mask, thresholds):
     thresholds.sort()
     e_pred = np.exp(pred - pred.min(axis=0))
     prob = (e_pred / np.sum(e_pred, axis=0, keepdims=True))[1]
@@ -277,12 +284,23 @@ def threshholds_strict(pred, mask, thresholds):
 
     return dices
 
-def create_dice_matrix(ds, preds, thresholds):
+def create_dice_matrix_pred_given(ds, preds, thresholds):
     dice_matrix = np.zeros((len(ds), len(thresholds)))
     for img_i in range(len(ds)):
         mask = ds[img_i]
         pred = np.array(preds[img_i])
-        dices = threshholds_strict(pred, mask, thresholds)
+        dices = thresholds_strict(pred, mask, thresholds)
+        dice_matrix[img_i] = dices
+
+    return dice_matrix
+
+def create_dice_matrix_from_scratch(ds, model, thresholds, section_size=[128, 128, 128], device='cuda'):
+    dice_matrix = np.zeros((len(ds['img']), len(thresholds)))
+    for img_i in range(len(ds['img'])):
+        mask = ds['mask'][img_i]
+        img = torch.from_numpy(ds['img'][img_i])
+        _, pred, _ = inference(img, model=model, section_size=section_size, device=device, gaussian_weights=True)
+        dices = thresholds_strict(pred, mask, thresholds)
         dice_matrix[img_i] = dices
 
     return dice_matrix
@@ -308,10 +326,10 @@ def statistical_analysis(dice_matrix, dice_th=0.1, im_save_path=None):
     x_coord[-1] = 1
     y_coord[-2:] = 1
 
-    tp = y_coord*72
-    fp = x_coord*83
-    fn = 72 - y_coord*72
-    tn = 83 - x_coord*83
+    tp = y_coord * N
+    fp = x_coord * T
+    fn = N - y_coord * N
+    tn = T - x_coord * T
     f1 = np.divide(2*tp, 2*tp+fp+fn, out=np.zeros_like(tp), where=2*tp+fp+fn!=0)
     f2 = np.divide(5*tp, 5*tp+4*fn+fp, out=np.zeros_like(tp), where=5*tp+4*fn+fp!=0)
     sens = np.divide(tp, tp+fn, out=np.zeros_like(tp), where=tp+fn!=0)
@@ -347,3 +365,8 @@ def statistical_analysis(dice_matrix, dice_th=0.1, im_save_path=None):
     print(f1.max(), f2[f1.argmax()], sens[f1.argmax()], spec[f1.argmax()], ppv[f1.argmax()], npv[f1.argmax()])
     print(f1[f2.argmax()], f2.max(), sens[f2.argmax()], spec[f2.argmax()], ppv[f2.argmax()], npv[f2.argmax()])
     return results, x_coord, y_coord
+
+def end2end_postprocess(model, pos_ds, neg_paths, save_str):
+    thresholds = get_neg_thresholds(paths=neg_paths, model=model)
+    dice_matrix = create_dice_matrix_from_scratch(ds=pos_ds, model=model, thresholds=thresholds)
+    im_save_path = os.path.join('/home/hansel/developer/segmentation/data/stats/')
