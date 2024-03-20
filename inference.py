@@ -361,12 +361,21 @@ def statistical_analysis(dice_matrix, dice_th=0.1, im_save_path=None):
         fig.savefig(im_save_path)
         plt.close(fig)
     
-    print((x_b*y_a).sum())
-    print(f1.max(), f2[f1.argmax()], sens[f1.argmax()], spec[f1.argmax()], ppv[f1.argmax()], npv[f1.argmax()])
-    print(f1[f2.argmax()], f2.max(), sens[f2.argmax()], spec[f2.argmax()], ppv[f2.argmax()], npv[f2.argmax()])
+    print('Area under the ROC ',(x_b*y_a).sum())
+    print('Results for maximal F1: F1', f1.max(), ' F2 ', f2[f1.argmax()], ' sensitivity ', sens[f1.argmax()], ' specificity ', spec[f1.argmax()], ' PPV ', ppv[f1.argmax()], ' NPV ', npv[f1.argmax()])
+    print('Results for maximal F2: F1', f1[f2.argmax()], ' F2 ', f2.max(), ' sensitivity ', sens[f2.argmax()], ' specificity ', spec[f2.argmax()], ' PPV ', ppv[f2.argmax()], ' NPV ', npv[f2.argmax()])
     return results, x_coord, y_coord
 
 def end2end_postprocess(model, pos_ds, neg_paths, save_str):
+    dir_path = os.path.join('/home/hansel/developer/segmentation/data/stats/', save_str)
+    os.makedirs(dir_path)
     thresholds = get_neg_thresholds(paths=neg_paths, model=model)
     dice_matrix = create_dice_matrix_from_scratch(ds=pos_ds, model=model, thresholds=thresholds)
-    im_save_path = os.path.join('/home/hansel/developer/segmentation/data/stats/')
+    im_save_path = os.path.join(dir_path, 'roc.png')
+    results, x_coord, y_coord = statistical_analysis(dice_matrix, im_save_path=im_save_path)
+    dict_to_save = {'control_max': thresholds,
+                    'dice_matrix':dice_matrix,
+                    'results':results,
+                    'x':x_coord,
+                    'y':y_coord}
+    np.save(os.path.join(dir_path, 'results'), dict_to_save, allow_pickle=True)
