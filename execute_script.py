@@ -30,7 +30,7 @@ def run_distr_training(config):
 
 if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = "2, 3"
-    torch.set_num_threads(2)
+    torch.set_num_threads(4)
     parser = argparse.ArgumentParser(description="Train a model with or without distributed training.")
     parser.add_argument("--dist", default=False, type=bool, help="Run distributed training")
     parser.add_argument("--config", default='medcent', type=str, help="Config to use")
