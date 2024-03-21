@@ -44,8 +44,11 @@ def check_for_dicomdir(dcm_path):
         root_path = fs.path
         file_ids = fs.find_values("ReferencedFileID")
         actual_path = os.path.join(root_path, *file_ids[0][:-1])
-    else:
+    elif os.path.isfile(glob.glob(os.path.join(dcm_path, '*'))[0]):
         actual_path = dcm_path
+        img_id = os.path.basename(dcm_path)
+    else:
+        actual_path = glob.glob(os.path.join(dcm_path, '*', '*', '*'))[0]
         img_id = os.path.basename(dcm_path)
     
     return actual_path, img_id

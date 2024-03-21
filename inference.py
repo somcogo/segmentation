@@ -1,9 +1,11 @@
+import os
 from functools import lru_cache
 
 import torch
 import h5py
 import numpy as np
 from scipy import ndimage
+import matplotlib.pyplot as plt
 
 from utils.model_init import model_init
 
@@ -114,11 +116,6 @@ def inference(img:torch.Tensor, model, section_size, device, gaussian_weights=Fa
                 pred[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp1 * gaussian if gaussian_weights else temp1
                 n_predictions[x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += gaussian if gaussian_weights else 1
                 del temp1, patch
-                # prob2[:, :, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp2
-                # temp_prob = temp2.argmax(dim=1)
-                # if temp_prob.max() > 0:
-                #     print(x_c, y_c, z_c)
-                # prob[:, x_c: x_c+x, y_c: y_c+y, z_c: z_c+z] += temp_prob
     pred /= n_predictions
     pred_class = pred.argmax(dim=1)
 
@@ -230,14 +227,14 @@ def analyse_results(inference_dict):
     analysis['upper_percentage'] = []
     analysis['lower_number'] = []
     analysis['upper_number'] = []
-    for threshhold in np.linspace(0., 1., num=11, endpoint=True):
-        lower_indices = np.where(inference_dict['dice_pp_size']<threshhold)
+    for threshold in np.linspace(0., 1., num=11, endpoint=True):
+        lower_indices = np.where(inference_dict['dice_pp_size']<threshold)
         analysis['lower_indices'].append(lower_indices)
         analysis['lower_dice'].append(inference_dict['dice_pp_size'][lower_indices])
         analysis['lower_number'].append(len(lower_indices[0]))
         analysis['lower_percentage'].append(len(lower_indices[0])/72)
 
-        upper_indices = np.where(inference_dict['dice_pp_size']>threshhold)
+        upper_indices = np.where(inference_dict['dice_pp_size']>threshold)
         analysis['upper_indices'].append(upper_indices)
         analysis['upper_dice'].append(inference_dict['dice_pp_size'][upper_indices])
         analysis['upper_number'].append(len(upper_indices[0]))
@@ -259,11 +256,126 @@ def postprocess_to_single_comp(pred_class):
 
     return postprocessed
 
-def threshholds_strict(pred, mask, thresholds):
-    prob = np.exp(pred) / np.sum(np.exp(pred), axis=0)[1]
+def get_neg_thresholds(paths, model, section_size=[128, 128, 128], device='cuda'):
+    pred_max = np.zeros((len(paths)))
+    for path_i, path in enumerate(paths):
+        img = np.load(path)
+        _, pred, _ = inference(img, model=model, section_size=section_size, device=device, gaussian_weights=True)
+        pred = pred.squeeze()
+        e_pred = np.exp(pred - pred.min(axis=0))
+        prob = (e_pred / np.sum(e_pred, axis=0, keepdims=True))[1]
+        pred_max[path_i] = prob.max()
+    return pred_max
+
+def thresholds_strict(pred, mask, thresholds):
+    thresholds.sort()
+    e_pred = np.exp(pred - pred.min(axis=0))
+    prob = (e_pred / np.sum(e_pred, axis=0, keepdims=True))[1]
     dices = np.zeros_like(thresholds)
     for i, th in enumerate(thresholds):
-        post = postprocess_to_single_comp(prob > th)
-        dices[i] = 2*(post * mask).sum()/(post.sum() + mask.sum())
+        if (prob > th).sum() > mask.sum()*19:
+            dices[i] = 0
+        elif (prob > th).sum() == 0:
+            dices[i] = 0
+            break
+        else:
+            post = postprocess_to_single_comp(prob > th)
+            dices[i] = 2*(post * mask).sum()/(post.sum() + mask.sum())
 
     return dices
+
+def create_dice_matrix_pred_given(ds, preds, thresholds):
+    dice_matrix = np.zeros((len(ds), len(thresholds)))
+    for img_i in range(len(ds)):
+        mask = ds[img_i]
+        pred = np.array(preds[img_i])
+        dices = thresholds_strict(pred, mask, thresholds)
+        dice_matrix[img_i] = dices
+
+    return dice_matrix
+
+def create_dice_matrix_from_scratch(ds, model, thresholds, section_size=[128, 128, 128], device='cuda'):
+    dice_matrix = np.zeros((len(ds['img']), len(thresholds)))
+    for img_i in range(len(ds['img'])):
+        mask = ds['mask'][img_i]
+        img = torch.from_numpy(ds['img'][img_i])
+        _, pred, _ = inference(img, model=model, section_size=section_size, device=device, gaussian_weights=True)
+        dices = thresholds_strict(pred, mask, thresholds)
+        dice_matrix[img_i] = dices
+
+    return dice_matrix
+
+def statistical_analysis(dice_matrix, dice_th=0.1, im_save_path=None):
+    N, T = dice_matrix.shape
+
+    x = np.linspace(0, 1, T, endpoint=False)
+    y = (dice_matrix > dice_th).sum(axis=0) / N
+    x.sort()
+    y.sort()
+
+    x_a = np.concatenate([[0.], x, [1.]])
+    y_a = np.concatenate([y, [1.]])
+    x_b = x_a[1:] - x_a[:-1]
+
+    x_coord = np.zeros((2*T + 3))
+    y_coord = np.zeros((2*T + 3))
+    x_coord[2:-2:2] = x
+    x_coord[3::2] = x
+    y_coord[1:-2:2] = y
+    y_coord[2:-2:2] = y
+    x_coord[-1] = 1
+    y_coord[-2:] = 1
+
+    tp = y_coord * N
+    fp = x_coord * T
+    fn = N - y_coord * N
+    tn = T - x_coord * T
+    f1 = np.divide(2*tp, 2*tp+fp+fn, out=np.zeros_like(tp), where=2*tp+fp+fn!=0)
+    f2 = np.divide(5*tp, 5*tp+4*fn+fp, out=np.zeros_like(tp), where=5*tp+4*fn+fp!=0)
+    sens = np.divide(tp, tp+fn, out=np.zeros_like(tp), where=tp+fn!=0)
+    spec = np.divide(tn, tn+fp, out=np.zeros_like(tn), where=tn+fp!=0)
+    ppv = np.divide(tp, tp+fp, out=np.zeros_like(tp), where=tp+fp!=0)
+    npv = np.divide(tn, tn+fn, out=np.zeros_like(tn), where=tn+fn!=0)
+
+    results = {'auroc':(x_b*y_a).sum(),
+               'f1max':{'f1':f1.max(),
+                        'f2':f2[f1.argmax()],
+                        'sensitivity':sens[f1.argmax()],
+                        'specificity':spec[f1.argmax()],
+                        'ppv':ppv[f1.argmax()],
+                        'npv':npv[f1.argmax()]},
+               'f2max':{'f1':f1[f2.argmax()],
+                        'f2':f2.max(),
+                        'sensitivity':sens[f2.argmax()],
+                        'specificity':spec[f2.argmax()],
+                        'ppv':ppv[f2.argmax()],
+                        'npv':npv[f2.argmax()]}}
+
+    if im_save_path is not None:
+        fig, ax = plt.subplots()
+        ax.set_xlabel('False positive rate')
+        ax.set_ylabel('True positive rate')
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.plot(x_coord, y_coord)
+        fig.savefig(im_save_path)
+        plt.close(fig)
+    
+    print('Area under the ROC ',(x_b*y_a).sum())
+    print('Results for maximal F1: F1', f1.max(), ' F2 ', f2[f1.argmax()], ' sensitivity ', sens[f1.argmax()], ' specificity ', spec[f1.argmax()], ' PPV ', ppv[f1.argmax()], ' NPV ', npv[f1.argmax()])
+    print('Results for maximal F2: F1', f1[f2.argmax()], ' F2 ', f2.max(), ' sensitivity ', sens[f2.argmax()], ' specificity ', spec[f2.argmax()], ' PPV ', ppv[f2.argmax()], ' NPV ', npv[f2.argmax()])
+    return results, x_coord, y_coord
+
+def end2end_postprocess(model, pos_ds, neg_paths, save_str):
+    dir_path = os.path.join('/home/hansel/developer/segmentation/data/stats/', save_str)
+    os.makedirs(dir_path)
+    thresholds = get_neg_thresholds(paths=neg_paths, model=model)
+    dice_matrix = create_dice_matrix_from_scratch(ds=pos_ds, model=model, thresholds=thresholds)
+    im_save_path = os.path.join(dir_path, 'roc.png')
+    results, x_coord, y_coord = statistical_analysis(dice_matrix, im_save_path=im_save_path)
+    dict_to_save = {'control_max': thresholds,
+                    'dice_matrix':dice_matrix,
+                    'results':results,
+                    'x':x_coord,
+                    'y':y_coord}
+    np.save(os.path.join(dir_path, 'results'), dict_to_save, allow_pickle=True)
