@@ -19,27 +19,28 @@ def run(rank, world_size, config):
 
     dist.destroy_process_group()
 
-def run_distr_training(config):
+def run_distr_training(config, world_size):
     os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "29500"
-    world_size = 2
+    os.environ["MASTER_PORT"] = "29501"
     mp.spawn(run,
         args=(world_size, config),
         nprocs=world_size,
         join=True)
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "2, 3"
+    visible_cuda_devices = "0, 1, 4, 5"
+    os.environ["CUDA_VISIBLE_DEVICES"] = visible_cuda_devices # DONT FORGET TO CHANGE WORLD SIZE
+    world_size = sum(c.isdigit() for c in visible_cuda_devices) # DONT FORGET TO CHANGE WITH CUDA DEVICES
     torch.set_num_threads(4)
     parser = argparse.ArgumentParser(description="Train a model with or without distributed training.")
     parser.add_argument("--dist", default=False, type=bool, help="Run distributed training")
     parser.add_argument("--config", default='medcent', type=str, help="Config to use")
     args = parser.parse_args()
 
-    config = get_config(args.config)
+    config = get_config(args, world_size)
     
     if args.dist:
-        run_distr_training(config)
+        run_distr_training(config, world_size)
     else:
         trainer = SegmentationTrainingApp(**config)
         trainer.main()
