@@ -77,7 +77,6 @@ def load_dcm_into_npy_vol(dcm_path):
 
 
 
-
 # dcm_path = '../data/CTAs/3014684'
 # dcm_path, _ = check_for_dicomdir(dcm_path)
 # spacing, _ = get_spacing_px_count(dcm_path)
