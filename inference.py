@@ -380,7 +380,9 @@ def end2end_postprocess(model, pos_ds, neg_paths, save_str):
     dir_path = os.path.join('/home/somahansel/developer/segmentation/data/stats/', save_str)
     os.makedirs(dir_path, exist_ok=True)
     thresholds = get_neg_thresholds(paths=neg_paths, model=model)
+    np.save(os.path.join(dir_path, 'thresholds.npy'), thresholds)
     dice_matrix = create_dice_matrix_from_scratch(ds=pos_ds, model=model, thresholds=thresholds)
+    np.save(os.path.join(dir_path, 'dice_matrix.npy'), dice_matrix)
     im_save_path = os.path.join(dir_path, 'roc.png')
     results, x_coord, y_coord = statistical_analysis(dice_matrix, im_save_path=im_save_path)
     dict_to_save = {'control_max': thresholds,
