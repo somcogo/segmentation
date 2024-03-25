@@ -261,12 +261,7 @@ def postprocess_to_single_comp(pred_class):
 def get_neg_thresholds(paths, model, section_size=[128, 128, 128], device='cuda'):
     pred_max = np.zeros((len(paths)))
     for path_i, path in enumerate(paths):
-        if os.path.isfile(path) and path.split('.')[-1] == 'npy':
-            img = np.load(path)
-        else:
-            path, img_id  = check_for_dicomdir(path)
-            img, sp = load_dcm_into_npy_vol(path)
-            img = (img - img.min()) / (img.max() - img.min())
+        img = np.load(path)
         img = torch.from_numpy(img).unsqueeze(0).unsqueeze(0).float()
         _, pred, prob = inference(img, model=model, section_size=section_size, device=device, gaussian_weights=True)
         prob = prob.squeeze().detach().cpu()
@@ -302,16 +297,17 @@ def create_dice_matrix_pred_given(ds, preds, thresholds):
 
     return dice_matrix
 
-def create_dice_matrix_from_scratch(ds, model, thresholds, section_size=[128, 128, 128], device='cuda'):
-    dice_matrix = np.zeros((len(ds['img']), len(thresholds)))
-    for img_i in range(len(ds['img'])):
-        mask = ds['mask'][img_i]
-        img = torch.from_numpy(ds['img'][img_i]).unsqueeze(0).unsqueeze(0).float()
+def create_dice_matrix_from_scratch(img_paths, mask_paths, model, thresholds, section_size=[128, 128, 128], device='cuda'):
+    N = len(img_paths)
+    dice_matrix = np.zeros((N, len(thresholds)))
+    for img_i in range(N):
+        mask = np.load(mask_paths[img_i])
+        img = torch.from_numpy(np.load(img_paths[img_i])).unsqueeze(0).unsqueeze(0).float()
         _, pred, _ = inference(img, model=model, section_size=section_size, device=device, gaussian_weights=True)
         pred = pred.squeeze().detach().cpu().numpy()
         dices = thresholds_strict(pred, mask, thresholds)
         dice_matrix[img_i] = dices
-        print(img_i + 1, '/', len(ds['img']))
+        print(img_i + 1, '/', N)
 
     return dice_matrix
 
@@ -376,12 +372,12 @@ def statistical_analysis(dice_matrix, dice_th=0.1, im_save_path=None):
     print('Results for maximal F2: F1', f1[f2.argmax()], ' F2 ', f2.max(), ' sensitivity ', sens[f2.argmax()], ' specificity ', spec[f2.argmax()], ' PPV ', ppv[f2.argmax()], ' NPV ', npv[f2.argmax()])
     return results, x_coord, y_coord
 
-def end2end_postprocess(model, pos_ds, neg_paths, save_str):
-    dir_path = os.path.join('/home/somahansel/developer/segmentation/data/stats/', save_str)
+def end2end_postprocess(model, img_paths, mask_paths, neg_paths, save_str):
+    dir_path = os.path.join('/home/hansel/developer/segmentation/data/stats/', save_str)
     os.makedirs(dir_path, exist_ok=True)
     thresholds = get_neg_thresholds(paths=neg_paths, model=model)
     np.save(os.path.join(dir_path, 'thresholds.npy'), thresholds)
-    dice_matrix = create_dice_matrix_from_scratch(ds=pos_ds, model=model, thresholds=thresholds)
+    dice_matrix = create_dice_matrix_from_scratch(img_paths=img_paths, mask_paths=mask_paths, model=model, thresholds=thresholds)
     np.save(os.path.join(dir_path, 'dice_matrix.npy'), dice_matrix)
     im_save_path = os.path.join(dir_path, 'roc.png')
     results, x_coord, y_coord = statistical_analysis(dice_matrix, im_save_path=im_save_path)
